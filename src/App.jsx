@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 // --- Funciones auxiliares para la conversión de audio ---
 // Estas funciones no forman parte del componente, por lo que se definen fuera.
@@ -172,7 +172,7 @@ export default function App() {
     };
     
     // Efecto para reproducir el audio cuando la URL cambia
-    React.useEffect(() => {
+    useEffect(() => {
         if (audioUrl && audioRef.current) {
             audioRef.current.play();
         }
@@ -247,3 +247,4 @@ export default function App() {
         </div>
     );
 }
+

@@ -11,7 +11,7 @@ import React, { useState, useRef, useEffect } from 'react';
 function base64ToArrayBuffer(base64) {
     const binaryString = window.atob(base64);
     const len = binaryString.length;
-    const bytes = new UintArray(len);
+    const bytes = new Uint8Array(len); // <<< CORREGIDO: UintArray -> Uint8Array
     for (let i = 0; i < len; i++) {
         bytes[i] = binaryString.charCodeAt(i);
     }
@@ -93,7 +93,7 @@ export default function App() {
 
     // Llama a nuestro propio backend en lugar de a la API de Google directamente
     const callBackendApi = async (textToSpeak, voice) => {
-        const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
+        const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts'; // URL de producción
 
         const response = await fetch(backendUrl, {
             method: 'POST',

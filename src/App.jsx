@@ -93,7 +93,7 @@ export default function App() {
 
     // Llama a nuestro propio backend en lugar de a la API de Google directamente
     const callBackendApi = async (textToSpeak, voice) => {
-        const backendUrl = 'http://localhost:3001/api/generate-tts';
+        const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
 
         const response = await fetch(backendUrl, {
             method: 'POST',

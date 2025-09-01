@@ -1,13 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 
 // --- Funciones auxiliares para la conversión de audio ---
-// Estas funciones no forman parte del componente, por lo que se definen fuera.
-
-/**
- * Convierte una cadena base64 a un ArrayBuffer.
- * @param {string} base64 - La cadena base64 a convertir.
- * @returns {ArrayBuffer}
- */
 function base64ToArrayBuffer(base64) {
     const binaryString = window.atob(base64);
     const len = binaryString.length;
@@ -18,30 +11,16 @@ function base64ToArrayBuffer(base64) {
     return bytes.buffer;
 }
 
-/**
- * Escribe una cadena de texto en un DataView.
- * @param {DataView} view - El DataView en el que se escribirá.
- * @param {number} offset - La posición donde empezar a escribir.
- * @param {string} string - La cadena a escribir.
- */
 function writeString(view, offset, string) {
     for (let i = 0; i < string.length; i++) {
         view.setUint8(offset + i, string.charCodeAt(i));
     }
 }
 
-/**
- * Convierte datos de audio PCM crudo a un Blob en formato WAV.
- * La API devuelve audio L16 (PCM crudo), que los navegadores no pueden reproducir
- * directamente. Esta función lo empaqueta en un contenedor WAV.
- * @param {Int16Array} pcmData - Los datos de audio PCM de 16 bits.
- * @param {number} sampleRate - La frecuencia de muestreo del audio (ej. 24000).
- * @returns {Blob} Un Blob que contiene el audio en formato WAV.
- */
 function pcmToWav(pcmData, sampleRate) {
     const numSamples = pcmData.length;
-    const numChannels = 1; // Audio mono
-    const bytesPerSample = 2; // 16-bit
+    const numChannels = 1;
+    const bytesPerSample = 2;
     const blockAlign = numChannels * bytesPerSample;
     const byteRate = sampleRate * blockAlign;
     const dataSize = numSamples * bytesPerSample;
@@ -73,61 +52,47 @@ function pcmToWav(pcmData, sampleRate) {
 // --- Componente principal de la aplicación ---
 export default function App() {
     const [text, setText] = useState('Hola, el clima para hoy en Esperanza, Santa Fe será soleado con una máxima de 25 grados.');
-    const [stylePrompt, setStylePrompt] = useState('');
     const [selectedVoice, setSelectedVoice] = useState('Kore');
-    const [speakingRate, setSpeakingRate] = useState(1.0); // Estado para la velocidad de lectura
+    const [stylePrompt, setStylePrompt] = useState('');
+    const [speakingRate, setSpeakingRate] = useState(1);
     const [isLoading, setIsLoading] = useState(false);
     const [status, setStatus] = useState({ message: '', type: '' });
     const [audioUrl, setAudioUrl] = useState('');
+    
     const audioRef = useRef(null);
-    const CHARACTER_LIMIT = 500;
+    const MAX_CHARS = 500;
+    const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
 
     const voices = [
-        // Voces Masculinas
+        { value: 'Zephyr', label: 'Zephyr (Brillante, Femenina)' },
         { value: 'Puck', label: 'Puck (Animada, Masculina)' },
         { value: 'Charon', label: 'Charon (Informativa, Masculina)' },
-        { value: 'Fenrir', label: 'Fenrir (Entusiasta, Masculina)' },
-        { value: 'Orus', label: 'Orus (Firme, Masculina)' },
-        { value: 'Algenib', label: 'Algenib (Grave, Masculina)' },
-        { value: 'Sadaltager', label: 'Sadaltager (Experta, Masculina)' },
-        // Voces Femeninas
         { value: 'Kore', label: 'Kore (Firme, Femenina)' },
-        { value: 'Zephyr', label: 'Zephyr (Brillante, Femenina)' },
+        { value: 'Fenrir', label: 'Fenrir (Entusiasta, Masculina)' },
         { value: 'Leda', label: 'Leda (Juvenil, Femenina)' },
-        { value: 'Aoede', label: 'Aoede (Fresca, Femenina)' },
-        { value: 'Autonoe', label: 'Autonoe (Brillante, Femenina)' },
+        { value: 'Orus', label: 'Orus (Firme, Masculina)' },
+        { value: 'Aoede', label: 'Aoede (Alegre, Femenina)' },
+        { value: 'Sadachbia', label: 'Sadachbia (Vivaz, Femenina)' },
         { value: 'Sulafat', label: 'Sulafat (Cálida, Femenina)' },
     ];
 
-    const callBackendApi = async (textToSpeak, voice, style, rate) => {
-        const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
-
+    const callBackendApi = async (textToSpeak, voice, style) => {
         const response = await fetch(backendUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                text: textToSpeak,
-                voice: voice,
-                style: style,
-                speakingRate: rate // Enviar la velocidad
-            })
+            body: JSON.stringify({ text: textToSpeak, voice, style })
         });
 
         if (!response.ok) {
             const errorData = await response.json();
             throw new Error(errorData.error || `Error del servidor: ${response.status}`);
         }
-
         return await response.json();
     };
 
     const handleGenerate = async () => {
-        if (!text.trim()) {
-            setStatus({ message: "Por favor, introduce algún texto.", type: "error" });
-            return;
-        }
-        if (text.length > CHARACTER_LIMIT) {
-            setStatus({ message: `El texto no puede superar los ${CHARACTER_LIMIT} caracteres.`, type: "error"});
+        if (!text.trim() || text.length > MAX_CHARS) {
+            setStatus({ message: "Por favor, introduce texto válido y no excedas el límite de caracteres.", type: "error" });
             return;
         }
 
@@ -136,7 +101,7 @@ export default function App() {
         setAudioUrl('');
 
         try {
-            const result = await callBackendApi(text, selectedVoice, stylePrompt, speakingRate);
+            const result = await callBackendApi(text, selectedVoice, stylePrompt);
             if (result && result.audioData) {
                 const mimeType = result.mimeType || 'audio/L16; rate=24000';
                 const sampleRateMatch = mimeType.match(/rate=(\d+)/);
@@ -160,15 +125,33 @@ export default function App() {
     
     useEffect(() => {
         if (audioUrl && audioRef.current) {
+            audioRef.current.playbackRate = speakingRate;
             audioRef.current.play();
         }
     }, [audioUrl]);
 
-    const handleClearText = () => {
+    // **NUEVO**: Efecto para cambiar la velocidad de reproducción en tiempo real
+    useEffect(() => {
+        if (audioRef.current) {
+            audioRef.current.playbackRate = speakingRate;
+        }
+    }, [speakingRate]);
+
+    const handleClear = () => {
         setText('');
-        setStylePrompt('');
         setAudioUrl('');
-        setStatus({ message: '', type: ''});
+        setStatus({ message: '', type: '' });
+    };
+
+    const handleDownload = () => {
+        if (audioUrl) {
+            const a = document.createElement('a');
+            a.href = audioUrl;
+            a.download = 'audio-generado.wav';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
     };
 
     return (
@@ -185,9 +168,7 @@ export default function App() {
                             <label htmlFor="text-input" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                                 Introduce el texto aquí
                             </label>
-                            <button onClick={handleClearText} className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition">
-                                Limpiar
-                            </button>
+                            <button onClick={handleClear} className="text-sm text-blue-500 hover:underline">Limpiar</button>
                         </div>
                         <textarea
                             id="text-input"
@@ -197,12 +178,10 @@ export default function App() {
                             value={text}
                             onChange={(e) => setText(e.target.value)}
                         />
-                        <p className={`text-xs text-right mt-1 ${text.length > CHARACTER_LIMIT ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}`}>
-                            {text.length} / {CHARACTER_LIMIT}
+                         <p className={`text-right text-sm mt-1 ${text.length > MAX_CHARS ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}`}>
+                            {text.length} / {MAX_CHARS}
                         </p>
                     </div>
-
-                    {/* Contenedor para selectores */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label htmlFor="voice-select" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -220,12 +199,12 @@ export default function App() {
                             </select>
                         </div>
                         <div>
-                            <label htmlFor="style-input" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            <label htmlFor="style-prompt" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                                 Tono o Estilo (opcional)
                             </label>
                             <input
                                 type="text"
-                                id="style-input"
+                                id="style-prompt"
                                 className="w-full p-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
                                 placeholder="Ej: alegre, susurrando..."
                                 value={stylePrompt}
@@ -233,29 +212,27 @@ export default function App() {
                             />
                         </div>
                     </div>
-                    
-                    {/* NUEVO CAMPO: Slider para la velocidad */}
                     <div>
-                        <label htmlFor="speed-slider" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Velocidad de Lectura: <span className="font-bold text-blue-500">{speakingRate.toFixed(1)}x</span>
+                        <label htmlFor="speed-control" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                           Velocidad de Lectura: <span className="font-bold text-blue-500">{speakingRate.toFixed(1)}x</span>
                         </label>
                         <input
+                            id="speed-control"
                             type="range"
-                            id="speed-slider"
                             min="0.5"
-                            max="2.0"
+                            max="2"
                             step="0.1"
                             value={speakingRate}
                             onChange={(e) => setSpeakingRate(parseFloat(e.target.value))}
-                            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-600 accent-blue-600"
+                            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
                         />
                     </div>
                 </div>
 
-                <div className="flex flex-col items-center justify-center space-y-4 pt-4">
+                <div className="flex flex-col items-center justify-center space-y-4">
                     <button
                         onClick={handleGenerate}
-                        disabled={isLoading || text.length > CHARACTER_LIMIT}
+                        disabled={isLoading || text.length > MAX_CHARS}
                         className="w-full md:w-auto px-8 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-300 ease-in-out transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {isLoading ? 'Generando...' : 'Generar Audio'}
@@ -265,7 +242,7 @@ export default function App() {
                              <div className="border-4 border-gray-200 border-t-blue-500 rounded-full w-8 h-8 animate-spin"></div>
                         )}
                         {status.message && (
-                            <p className={`text-sm text-center ${status.type === 'error' ? 'text-red-500' : 'text-green-500'}`}>
+                            <p className={`text-center ${status.type === 'error' ? 'text-red-500' : 'text-green-500'}`}>
                                 {status.message}
                             </p>
                         )}
@@ -273,22 +250,21 @@ export default function App() {
                 </div>
 
                 {audioUrl && (
-                    <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-4">
+                    <div className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                         <p className="text-sm font-medium text-gray-700 dark:text-gray-300 text-center">Audio generado:</p>
                         <audio ref={audioRef} controls src={audioUrl} className="w-full"></audio>
                         <div className="text-center">
-                            <a
-                              href={audioUrl}
-                              download="audio_generado.wav"
-                              className="inline-block px-6 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-300"
+                             <button
+                                onClick={handleDownload}
+                                className="w-full md:w-auto px-6 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-300"
                             >
-                                Descargar Audio (WAV)
-                            </a>
+                                Descargar Audio (a {speakingRate.toFixed(1)}x)
+                            </button>
                         </div>
+                        <p className="text-xs text-center text-gray-500 dark:text-gray-400">Nota: La descarga siempre será del audio a velocidad normal (1x).</p>
                     </div>
                 )}
             </div>
         </div>
     );
-}
-
+                                }

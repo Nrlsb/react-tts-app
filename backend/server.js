@@ -1,7 +1,7 @@
 // Importar los módulos necesarios
 const express = require('express');
 const fetch = require('node-fetch');
-const cors = require('cors'); // <== 1. IMPORTAR CORS
+const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
@@ -11,17 +11,16 @@ const PORT = process.env.PORT || 3001;
 
 // Configuración de CORS para permitir solicitudes solo desde tu app en Vercel
 const corsOptions = {
-  origin: 'https://react-tts-app-vercel.app', // <== 2. ESPECIFICAR EL DOMINIO PERMITIDO
+  origin: 'https://react-tts-app.vercel.app', // <== CORREGIDO: Guion cambiado por punto
   optionsSuccessStatus: 200 
 };
-app.use(cors(corsOptions)); // <== 3. USAR EL MIDDLEWARE
+app.use(cors(corsOptions));
 
 app.use(express.json());
 
 
 // --- Ruta de la API ---
 app.post('/api/generate-tts', async (req, res) => {
-    // ... (El resto del código de esta función no cambia)
     const { text, voice } = req.body;
     const apiKey = process.env.GOOGLE_API_KEY;
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;

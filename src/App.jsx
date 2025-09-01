@@ -108,26 +108,90 @@ export default function App() {
     useEffect(() => {
         const soundTouchUrl = new URL('/sound-touch.js', window.location.origin).href;
 
+        // --- INICIO: Lógica del Worker de Audio (Corregida) ---
         const workerScript = `
             try {
                 importScripts('${soundTouchUrl}');
             } catch (e) {
-                self.postMessage({ error: 'No se pudo cargar la librería de procesamiento de audio.' });
+                self.postMessage({ error: 'No se pudo cargar la librería de procesamiento de audio: ' + e.message });
                 throw e; 
             }
 
             self.onmessage = (e) => {
                 const { buffer, sampleRate, tempo } = e.data;
                 
-                const soundtouch = new self.SoundTouch();
-                soundtouch.tempo = tempo;
-                soundtouch.sampleRate = sampleRate;
-                
-                const node = soundtouch.createNode(buffer, soundtouch.bufferSize);
-                const result = node.getSamples();
-                self.postMessage({ result });
+                // 1. Crear un 'source' que la librería pueda consumir.
+                const source = {
+                    position: 0,
+                    get: function(frameCount) {
+                        if (this.position >= buffer.length) {
+                            return null; // Fin del buffer
+                        }
+                        const end = Math.min(this.position + frameCount, buffer.length);
+                        // La librería espera audio estéreo intercalado (interleaved).
+                        // Creamos un buffer estéreo duplicando nuestro canal mono.
+                        const monoChunk = buffer.subarray(this.position, end);
+                        const stereoChunk = new Float32Array(monoChunk.length * 2);
+                        for (let i = 0; i < monoChunk.length; i++) {
+                            stereoChunk[i * 2] = monoChunk[i];
+                            stereoChunk[i * 2 + 1] = monoChunk[i];
+                        }
+                        this.position = end;
+                        return stereoChunk;
+                    }
+                };
+
+                // 2. Crear un objeto 'pipeSource' con las propiedades que SoundTouch.P espera.
+                const pipeSource = {
+                    sampleRate: sampleRate,
+                    tempo: tempo,
+                    pitch: 1.0,
+                    rate: 1.0,
+                    get: source.get.bind(source), // ¡Importante! 'bind(this)' para mantener el contexto.
+                    end: () => null,
+                    clear: () => {},
+                    off: () => {},
+                    on: () => {},
+                    clone: function() { return this; }
+                };
+
+                try {
+                    // 3. Crear la instancia del procesador SoundTouch (el 'pipe').
+                    const soundtouch_pipe = new self.SoundTouch.P(pipeSource);
+                    soundtouch_pipe.tempo = tempo; // Asignar el tempo deseado.
+                    
+                    const all_processed_data = [];
+                    const CHUNK_SIZE = 8192;
+                    let processed_chunk_stereo;
+
+                    // 4. Procesar el audio en fragmentos (chunks) hasta que no quede más.
+                    do {
+                        // getSamples devuelve audio estéreo desintercalado: [canal_izquierdo, canal_derecho]
+                        processed_chunk_stereo = soundtouch_pipe.getSamples(CHUNK_SIZE); 
+                        if (processed_chunk_stereo && processed_chunk_stereo[0].length > 0) {
+                            // Nos quedamos solo con un canal para tener audio mono.
+                            all_processed_data.push(processed_chunk_stereo[0]);
+                        }
+                    } while (processed_chunk_stereo && processed_chunk_stereo[0].length > 0);
+
+                    // 5. Concatenar todos los fragmentos procesados en un único array.
+                    const totalLength = all_processed_data.reduce((sum, arr) => sum + arr.length, 0);
+                    const result = new Float32Array(totalLength);
+                    let offset = 0;
+                    for (const chunk of all_processed_data) {
+                        result.set(chunk, offset);
+                        offset += chunk.length;
+                    }
+
+                    // 6. Enviar el resultado final al hilo principal.
+                    self.postMessage({ result });
+
+                } catch(err) {
+                    self.postMessage({ error: 'Error dentro del worker: ' + err.message });
+                }
             };
         `;
+        // --- FIN: Lógica del Worker de Audio (Corregida) ---
         
         try {
             const blob = new Blob([workerScript], { type: 'application/javascript' });
@@ -407,4 +471,4 @@ export default function App() {
             </div>
         </div>
     );
-                    }
+}

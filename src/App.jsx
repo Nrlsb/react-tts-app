@@ -106,17 +106,19 @@ export default function App() {
     const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
     
     useEffect(() => {
-        // *** CAMBIO: Usamos el CDN de cdnjs (Cloudflare), que es más robusto. ***
-        const soundTouchUrl = 'https://cdnjs.cloudflare.com/ajax/libs/sound-touch-js/2.3.1/sound-touch.js';
+        // *** SOLUCIÓN DEFINITIVA: Cargar el script desde la carpeta `public` del proyecto. ***
+        // Esto asegura que el archivo se sirve desde el mismo origen que la aplicación,
+        // eliminando cualquier problema de CORS, firewall o bloqueo de red.
+        const soundTouchUrl = '/sound-touch.js';
 
         const workerScript = `
             try {
-                // Cargar la librería SoundTouch desde el nuevo CDN.
+                // Cargar la librería SoundTouch desde la ruta local.
                 importScripts('${soundTouchUrl}');
             } catch (e) {
-                // Si falla, notificar al hilo principal para que muestre un error.
+                // Si falla, notificar al hilo principal.
                 self.postMessage({ error: 'No se pudo cargar la librería de procesamiento de audio.' });
-                throw e; // Detener la ejecución del worker.
+                throw e; 
             }
 
             self.onmessage = (e) => {
@@ -128,7 +130,6 @@ export default function App() {
                 
                 const node = soundtouch.createNode(buffer, soundtouch.bufferSize);
                 const result = node.getSamples();
-                // Devolvemos el resultado en un objeto para poder manejar errores más fácilmente.
                 self.postMessage({ result });
             };
         `;
@@ -261,7 +262,6 @@ export default function App() {
             });
 
             workerRef.current.onmessage = (e) => {
-                // *** CAMBIO: Manejamos el caso de error que viene desde el worker. ***
                 if (e.data.error) {
                     console.error("Error desde el worker:", e.data.error);
                     setStatus({ message: `Error de procesamiento: ${e.data.error}`, type: "error" });
@@ -412,4 +412,4 @@ export default function App() {
             </div>
         </div>
     );
-                }
+         }

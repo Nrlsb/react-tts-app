@@ -101,113 +101,8 @@ export default function App() {
     
     const audioRef = useRef(null);
     const originalAudioBlob = useRef(null);
-    const workerRef = useRef(null);
     const MAX_CHARS = 5000;
     const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
-    
-    useEffect(() => {
-        const soundTouchUrl = new URL('/sound-touch.js', window.location.origin).href;
-
-        // --- INICIO: Lógica del Worker de Audio (Corregida) ---
-        const workerScript = `
-            try {
-                importScripts('${soundTouchUrl}');
-            } catch (e) {
-                self.postMessage({ error: 'No se pudo cargar la librería de procesamiento de audio: ' + e.message });
-                throw e; 
-            }
-
-            self.onmessage = (e) => {
-                const { buffer, sampleRate, tempo } = e.data;
-                
-                // 1. Crear un 'source' que la librería pueda consumir.
-                const source = {
-                    position: 0,
-                    get: function(frameCount) {
-                        if (this.position >= buffer.length) {
-                            return null; // Fin del buffer
-                        }
-                        const end = Math.min(this.position + frameCount, buffer.length);
-                        // La librería espera audio estéreo intercalado (interleaved).
-                        // Creamos un buffer estéreo duplicando nuestro canal mono.
-                        const monoChunk = buffer.subarray(this.position, end);
-                        const stereoChunk = new Float32Array(monoChunk.length * 2);
-                        for (let i = 0; i < monoChunk.length; i++) {
-                            stereoChunk[i * 2] = monoChunk[i];
-                            stereoChunk[i * 2 + 1] = monoChunk[i];
-                        }
-                        this.position = end;
-                        return stereoChunk;
-                    }
-                };
-
-                // 2. Crear un objeto 'pipeSource' con las propiedades que SoundTouch.P espera.
-                const pipeSource = {
-                    sampleRate: sampleRate,
-                    tempo: tempo,
-                    pitch: 1.0,
-                    rate: 1.0,
-                    get: source.get.bind(source), // ¡Importante! 'bind(this)' para mantener el contexto.
-                    end: () => null,
-                    clear: () => {},
-                    off: () => {},
-                    on: () => {},
-                    clone: function() { return this; }
-                };
-
-                try {
-                    // 3. Crear la instancia del procesador SoundTouch (el 'pipe').
-                    const soundtouch_pipe = new self.SoundTouch.P(pipeSource);
-                    soundtouch_pipe.tempo = tempo; // Asignar el tempo deseado.
-                    
-                    const all_processed_data = [];
-                    const CHUNK_SIZE = 8192;
-                    let processed_chunk_stereo;
-
-                    // 4. Procesar el audio en fragmentos (chunks) hasta que no quede más.
-                    do {
-                        // getSamples devuelve audio estéreo desintercalado: [canal_izquierdo, canal_derecho]
-                        processed_chunk_stereo = soundtouch_pipe.getSamples(CHUNK_SIZE); 
-                        if (processed_chunk_stereo && processed_chunk_stereo[0].length > 0) {
-                            // Nos quedamos solo con un canal para tener audio mono.
-                            all_processed_data.push(processed_chunk_stereo[0]);
-                        }
-                    } while (processed_chunk_stereo && processed_chunk_stereo[0].length > 0);
-
-                    // 5. Concatenar todos los fragmentos procesados en un único array.
-                    const totalLength = all_processed_data.reduce((sum, arr) => sum + arr.length, 0);
-                    const result = new Float32Array(totalLength);
-                    let offset = 0;
-                    for (const chunk of all_processed_data) {
-                        result.set(chunk, offset);
-                        offset += chunk.length;
-                    }
-
-                    // 6. Enviar el resultado final al hilo principal.
-                    self.postMessage({ result });
-
-                } catch(err) {
-                    self.postMessage({ error: 'Error dentro del worker: ' + err.message });
-                }
-            };
-        `;
-        // --- FIN: Lógica del Worker de Audio (Corregida) ---
-        
-        try {
-            const blob = new Blob([workerScript], { type: 'application/javascript' });
-            workerRef.current = new Worker(URL.createObjectURL(blob));
-        } catch (error) {
-            console.error("No se pudo crear el worker:", error);
-            setStatus({ message: "No se pudo inicializar el procesador de audio.", type: "error" });
-        }
-
-        return () => {
-            if (workerRef.current) {
-                workerRef.current.terminate();
-            }
-        };
-    }, []);
-
 
     const voices = [
         { value: 'Zephyr', label: 'Zephyr (Brillante, Femenina)' },
@@ -301,54 +196,82 @@ export default function App() {
     }
 
     const handleModifiedDownload = async () => {
-        if (!originalAudioBlob.current || !workerRef.current) {
-            setStatus({ message: 'El procesador de audio no está listo. Inténtalo de nuevo.', type: 'error' });
+        if (!originalAudioBlob.current) {
+             setStatus({ message: 'No hay audio original para procesar.', type: 'error' });
+            return;
+        }
+        if (typeof SoundTouch === 'undefined') {
+             setStatus({ message: 'La librería de audio no se ha cargado correctamente.', type: 'error' });
             return;
         }
     
         setIsProcessingDownload(true);
-        setStatus({ message: 'Procesando audio (puede tardar)...', type: 'info' });
+        setStatus({ message: 'Procesando audio (la página puede congelarse)...', type: 'info' });
 
-        try {
-            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const arrayBuffer = await originalAudioBlob.current.arrayBuffer();
-            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-            
-            workerRef.current.postMessage({
-                buffer: audioBuffer.getChannelData(0),
-                sampleRate: audioBuffer.sampleRate,
-                tempo: speakingRate
-            });
+        // Usamos setTimeout para permitir que el estado de la UI se actualice antes de empezar el cálculo intensivo.
+        setTimeout(async () => {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const arrayBuffer = await originalAudioBlob.current.arrayBuffer();
+                const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                const monoBuffer = audioBuffer.getChannelData(0);
 
-            workerRef.current.onmessage = (e) => {
-                if (e.data.error) {
-                    console.error("Error desde el worker:", e.data.error);
-                    setStatus({ message: `Error de procesamiento: ${e.data.error}`, type: "error" });
-                    setIsProcessingDownload(false);
-                    return;
+                const source = {
+                    position: 0,
+                    get: function(frameCount) {
+                        if (this.position >= monoBuffer.length) return null;
+                        const end = Math.min(this.position + frameCount, monoBuffer.length);
+                        const monoChunk = monoBuffer.subarray(this.position, end);
+                        const stereoChunk = new Float32Array(monoChunk.length * 2);
+                        for (let i = 0; i < monoChunk.length; i++) {
+                            stereoChunk[i * 2] = stereoChunk[i * 2 + 1] = monoChunk[i];
+                        }
+                        this.position = end;
+                        return stereoChunk;
+                    }
+                };
+                
+                const pipeSource = {
+                    sampleRate: audioBuffer.sampleRate,
+                    tempo: speakingRate,
+                    get: source.get.bind(source),
+                    end: () => null, clear: () => {}, off: () => {}, on: () => {}, clone: function() { return this; }
+                };
+
+                const soundtouchPipe = new SoundTouch.P(pipeSource);
+                const allProcessedData = [];
+                const CHUNK_SIZE = 8192;
+                let processedChunk;
+                
+                do {
+                    processedChunk = soundtouchPipe.getSamples(CHUNK_SIZE);
+                    if (processedChunk && processedChunk[0].length > 0) {
+                        allProcessedData.push(processedChunk[0]);
+                    }
+                } while (processedChunk && processedChunk[0].length > 0);
+
+                const totalLength = allProcessedData.reduce((sum, arr) => sum + arr.length, 0);
+                const finalBufferData = new Float32Array(totalLength);
+                let offset = 0;
+                for (const chunk of allProcessedData) {
+                    finalBufferData.set(chunk, offset);
+                    offset += chunk.length;
                 }
-
-                const processedSamples = e.data.result;
-                const newAudioBuffer = audioCtx.createBuffer(1, processedSamples.length, audioBuffer.sampleRate);
-                newAudioBuffer.copyToChannel(processedSamples, 0);
+                
+                const newAudioBuffer = audioCtx.createBuffer(1, finalBufferData.length, audioBuffer.sampleRate);
+                newAudioBuffer.copyToChannel(finalBufferData, 0);
 
                 const processedWavBlob = audioBufferToWav(newAudioBuffer);
                 triggerDownload(processedWavBlob, speakingRate);
                 setStatus({ message: '¡Descarga de alta calidad iniciada!', type: 'success' });
+            
+            } catch (error) {
+                console.error("Error procesando el audio:", error);
+                setStatus({ message: `Error al procesar: ${error.message}`, type: "error" });
+            } finally {
                 setIsProcessingDownload(false);
-            };
-
-            workerRef.current.onerror = (err) => {
-                console.error("Error en el Worker de audio:", err);
-                setStatus({ message: `Error al procesar: ${err.message}`, type: "error" });
-                setIsProcessingDownload(false);
-            };
-
-        } catch (error) {
-            console.error("Error preparando el procesamiento de audio:", error);
-            setStatus({ message: `Error al preparar: ${error.message}`, type: "error" });
-            setIsProcessingDownload(false);
-        }
+            }
+        }, 50); // Un pequeño retraso para que la UI se actualice.
     };
 
     return (
@@ -460,7 +383,7 @@ export default function App() {
                             </button>
                              <button
                                 onClick={handleModifiedDownload}
-                                disabled={isProcessingDownload || speakingRate === 1 || !workerRef.current}
+                                disabled={isProcessingDownload || speakingRate === 1}
                                 className="w-full sm:w-auto px-6 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {isProcessingDownload ? 'Procesando...' : `Tono Corregido (${speakingRate.toFixed(1)}x)`}

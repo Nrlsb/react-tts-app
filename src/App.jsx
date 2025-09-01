@@ -49,7 +49,6 @@ function pcmToWav(pcmData, sampleRate) {
     return new Blob([view], { type: 'audio/wav' });
 }
 
-// **NUEVA FUNCIÓN**: Convierte un AudioBuffer procesado de vuelta a un Blob WAV.
 function audioBufferToWav(buffer) {
     const numOfChan = buffer.numberOfChannels;
     const length = buffer.length * numOfChan * 2 + 44;
@@ -61,7 +60,6 @@ function audioBufferToWav(buffer) {
     let offset = 0;
     let pos = 0;
 
-    // Escribir el encabezado WAV
     writeString(view, offset, 'RIFF'); offset += 4;
     view.setUint32(offset, length - 8, true); offset += 4;
     writeString(view, offset, 'WAVE'); offset += 4;
@@ -76,7 +74,6 @@ function audioBufferToWav(buffer) {
     writeString(view, offset, 'data'); offset += 4;
     view.setUint32(offset, length - pos - 4, true); offset += 4;
 
-    // Escribir los datos PCM
     for (i = 0; i < buffer.numberOfChannels; i++) {
         channels.push(buffer.getChannelData(i));
     }
@@ -159,7 +156,7 @@ export default function App() {
                 const pcmData = base64ToArrayBuffer(result.audioData);
                 const pcm16 = new Int16Array(pcmData);
                 const wavBlob = pcmToWav(pcm16, sampleRate);
-                originalAudioBlob.current = wavBlob; // Guardamos el blob original
+                originalAudioBlob.current = wavBlob;
                 
                 const url = URL.createObjectURL(wavBlob);
                 setAudioUrl(url);
@@ -197,47 +194,72 @@ export default function App() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `audio-${speed.toFixed(1)}x.wav`;
+        a.download = `audio-HQ-${speed.toFixed(1)}x.wav`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     }
 
-    // **NUEVA FUNCIÓN**: Procesa y descarga el audio con la velocidad modificada.
+    // **NUEVA LÓGICA DE DESCARGA CON SOUNDTOUCHJS**
     const handleModifiedDownload = async () => {
-        if (!originalAudioBlob.current) return;
+        if (!originalAudioBlob.current || typeof SoundTouch === 'undefined') {
+             setStatus({ message: "La librería de audio no está lista.", type: "error" });
+            return;
+        }
 
         setIsProcessingDownload(true);
-        setStatus({ message: 'Procesando audio...', type: 'info' });
+        setStatus({ message: 'Procesando audio (puede tardar)...', type: 'info' });
 
         try {
+            // Usamos un worker para no bloquear la interfaz principal
+            const worker = new Worker(URL.createObjectURL(new Blob([`
+                self.importScripts('https://cdn.jsdelivr.net/npm/sound-touch-js@2.3.1/dist/sound-touch.js');
+                self.onmessage = (e) => {
+                    const { buffer, sampleRate, tempo } = e.data;
+                    const soundtouch = new SoundTouch();
+                    soundtouch.tempo = tempo;
+                    soundtouch.sampleRate = sampleRate;
+                    
+                    const node = soundtouch.createNode(buffer, soundtouch.bufferSize);
+                    const result = node.getSamples();
+                    self.postMessage(result);
+                };
+            `], { type: 'application/javascript' })));
+
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             const arrayBuffer = await originalAudioBlob.current.arrayBuffer();
-            const originalBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-
-            const offlineCtx = new OfflineAudioContext(
-                originalBuffer.numberOfChannels,
-                originalBuffer.duration * originalBuffer.sampleRate / speakingRate,
-                originalBuffer.sampleRate
-            );
-
-            const source = offlineCtx.createBufferSource();
-            source.buffer = originalBuffer;
-            source.playbackRate.value = speakingRate;
-            source.connect(offlineCtx.destination);
-            source.start();
-
-            const processedBuffer = await offlineCtx.startRendering();
-            const processedWavBlob = audioBufferToWav(processedBuffer);
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
             
-            triggerDownload(processedWavBlob, speakingRate);
-            setStatus({ message: '¡Descarga iniciada!', type: 'success' });
+            worker.postMessage({
+                buffer: audioBuffer.getChannelData(0),
+                sampleRate: audioBuffer.sampleRate,
+                tempo: speakingRate
+            });
+
+            worker.onmessage = (e) => {
+                const processedSamples = e.data;
+                const newAudioBuffer = audioCtx.createBuffer(1, processedSamples.length, audioBuffer.sampleRate);
+                newAudioBuffer.copyToChannel(processedSamples, 0);
+
+                const processedWavBlob = audioBufferToWav(newAudioBuffer);
+                triggerDownload(processedWavBlob, speakingRate);
+                setStatus({ message: '¡Descarga de alta calidad iniciada!', type: 'success' });
+                worker.terminate();
+                setIsProcessingDownload(false);
+            };
+
+            worker.onerror = (err) => {
+                console.error("Error en el Worker de audio:", err);
+                setStatus({ message: `Error al procesar: ${err.message}`, type: "error" });
+                worker.terminate();
+                setIsProcessingDownload(false);
+            };
+
 
         } catch (error) {
-            console.error("Error procesando el audio:", error);
-            setStatus({ message: `Error al procesar: ${error.message}`, type: "error" });
-        } finally {
+            console.error("Error preparando el procesamiento de audio:", error);
+            setStatus({ message: `Error al preparar: ${error.message}`, type: "error" });
             setIsProcessingDownload(false);
         }
     };
@@ -251,7 +273,6 @@ export default function App() {
                 </div>
 
                 <div className="space-y-4">
-                    {/* ... (resto del JSX de text area, selectores, etc. se mantiene igual) ... */}
                      <div>
                         <div className="flex justify-between items-center mb-2">
                             <label htmlFor="text-input" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -348,14 +369,14 @@ export default function App() {
                                 disabled={isProcessingDownload}
                                 className="w-full sm:w-auto px-6 py-2 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition duration-300 disabled:opacity-50"
                             >
-                                Descargar (1.0x)
+                                Original (1.0x)
                             </button>
                              <button
                                 onClick={handleModifiedDownload}
                                 disabled={isProcessingDownload || speakingRate === 1}
                                 className="w-full sm:w-auto px-6 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                {isProcessingDownload ? 'Procesando...' : `Descargar (${speakingRate.toFixed(1)}x)`}
+                                {isProcessingDownload ? 'Procesando...' : `Tono Corregido (${speakingRate.toFixed(1)}x)`}
                             </button>
                         </div>
                     </div>
@@ -363,4 +384,4 @@ export default function App() {
             </div>
         </div>
     );
-}
+        }

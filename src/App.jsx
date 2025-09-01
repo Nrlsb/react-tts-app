@@ -208,7 +208,6 @@ export default function App() {
         setIsProcessingDownload(true);
         setStatus({ message: 'Procesando audio (la página puede congelarse)...', type: 'info' });
 
-        // Usamos setTimeout para permitir que el estado de la UI se actualice antes de empezar el cálculo intensivo.
         setTimeout(async () => {
             try {
                 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -216,50 +215,38 @@ export default function App() {
                 const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
                 const monoBuffer = audioBuffer.getChannelData(0);
 
-                const source = {
-                    position: 0,
-                    get: function(frameCount) {
-                        if (this.position >= monoBuffer.length) return null;
-                        const end = Math.min(this.position + frameCount, monoBuffer.length);
-                        const monoChunk = monoBuffer.subarray(this.position, end);
-                        const stereoChunk = new Float32Array(monoChunk.length * 2);
-                        for (let i = 0; i < monoChunk.length; i++) {
-                            stereoChunk[i * 2] = stereoChunk[i * 2 + 1] = monoChunk[i];
-                        }
-                        this.position = end;
-                        return stereoChunk;
-                    }
-                };
+                // --- INICIO: Lógica de procesamiento con SoundTouch (Corregida) ---
                 
-                const pipeSource = {
-                    sampleRate: audioBuffer.sampleRate,
-                    tempo: speakingRate,
-                    get: source.get.bind(source),
-                    end: () => null, clear: () => {}, off: () => {}, on: () => {}, clone: function() { return this; }
-                };
-
-                const soundtouchPipe = new SoundTouch.P(pipeSource);
-                const allProcessedData = [];
-                const CHUNK_SIZE = 8192;
-                let processedChunk;
+                // 1. Crear la instancia de SoundTouch.
+                const soundTouch = new SoundTouch();
                 
-                do {
-                    processedChunk = soundtouchPipe.getSamples(CHUNK_SIZE);
-                    if (processedChunk && processedChunk[0].length > 0) {
-                        allProcessedData.push(processedChunk[0]);
-                    }
-                } while (processedChunk && processedChunk[0].length > 0);
+                // 2. Configurar los parámetros.
+                soundTouch.tempo = speakingRate;
+                soundtouch.sampleRate = audioBuffer.sampleRate;
+                soundtouch.pitch = 1.0;
 
-                const totalLength = allProcessedData.reduce((sum, arr) => sum + arr.length, 0);
-                const finalBufferData = new Float32Array(totalLength);
-                let offset = 0;
-                for (const chunk of allProcessedData) {
-                    finalBufferData.set(chunk, offset);
-                    offset += chunk.length;
+                // 3. Crear un "Filter" que procesará el audio.
+                // Esta versión de la librería espera un buffer estéreo, así que lo simulamos.
+                const stereoBuffer = new Float32Array(monoBuffer.length * 2);
+                for(let i = 0; i < monoBuffer.length; i++) {
+                    stereoBuffer[i*2] = stereoBuffer[i*2+1] = monoBuffer[i];
+                }
+
+                const simpleFilter = soundTouch.createSimpleFilter(stereoBuffer, 2, audioBuffer.sampleRate);
+                
+                // 4. Extraer todos los samples procesados.
+                const processedSamplesStereo = simpleFilter.getSamples();
+                
+                // 5. Convertir de vuelta a mono para la descarga.
+                const processedSamplesMono = new Float32Array(processedSamplesStereo.length / 2);
+                for (let i = 0; i < processedSamplesMono.length; i++) {
+                    processedSamplesMono[i] = processedSamplesStereo[i*2];
                 }
                 
-                const newAudioBuffer = audioCtx.createBuffer(1, finalBufferData.length, audioBuffer.sampleRate);
-                newAudioBuffer.copyToChannel(finalBufferData, 0);
+                // --- FIN: Lógica de procesamiento con SoundTouch ---
+
+                const newAudioBuffer = audioCtx.createBuffer(1, processedSamplesMono.length, audioBuffer.sampleRate);
+                newAudioBuffer.copyToChannel(processedSamplesMono, 0);
 
                 const processedWavBlob = audioBufferToWav(newAudioBuffer);
                 triggerDownload(processedWavBlob, speakingRate);
@@ -271,7 +258,7 @@ export default function App() {
             } finally {
                 setIsProcessingDownload(false);
             }
-        }, 50); // Un pequeño retraso para que la UI se actualice.
+        }, 50); 
     };
 
     return (
@@ -395,3 +382,4 @@ export default function App() {
         </div>
     );
 }
+

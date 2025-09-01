@@ -73,6 +73,7 @@ function pcmToWav(pcmData, sampleRate) {
 // --- Componente principal de la aplicación ---
 export default function App() {
     const [text, setText] = useState('Hola, el clima para hoy en Esperanza, Santa Fe será soleado con una máxima de 25 grados.');
+    const [stylePrompt, setStylePrompt] = useState(''); // Estado para el tono/estilo
     const [selectedVoice, setSelectedVoice] = useState('Kore');
     const [isLoading, setIsLoading] = useState(false);
     const [status, setStatus] = useState({ message: '', type: '' });
@@ -80,7 +81,6 @@ export default function App() {
     const audioRef = useRef(null);
     const CHARACTER_LIMIT = 500;
 
-    // MEJORA 1: Lista de voces ampliada y más descriptiva
     const voices = [
         // Voces Masculinas
         { value: 'Puck', label: 'Puck (Animada, Masculina)' },
@@ -98,14 +98,13 @@ export default function App() {
         { value: 'Sulafat', label: 'Sulafat (Cálida, Femenina)' },
     ];
 
-    const callBackendApi = async (textToSpeak, voice) => {
-        // Se revirtió el cambio para asegurar la compatibilidad.
-        const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts'; // URL de producción
+    const callBackendApi = async (textToSpeak, voice, style) => {
+        const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts'; 
 
         const response = await fetch(backendUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: textToSpeak, voice: voice })
+            body: JSON.stringify({ text: textToSpeak, voice: voice, style: style }) // Enviar el estilo al backend
         });
 
         if (!response.ok) {
@@ -131,7 +130,7 @@ export default function App() {
         setAudioUrl('');
 
         try {
-            const result = await callBackendApi(text, selectedVoice);
+            const result = await callBackendApi(text, selectedVoice, stylePrompt); // Pasar el estilo a la función
             if (result && result.audioData) {
                 const mimeType = result.mimeType || 'audio/L16; rate=24000';
                 const sampleRateMatch = mimeType.match(/rate=(\d+)/);
@@ -153,7 +152,6 @@ export default function App() {
         }
     };
     
-    // Efecto para reproducir el audio cuando la URL cambia
     useEffect(() => {
         if (audioUrl && audioRef.current) {
             audioRef.current.play();
@@ -162,6 +160,7 @@ export default function App() {
 
     const handleClearText = () => {
         setText('');
+        setStylePrompt('');
         setAudioUrl('');
         setStatus({ message: '', type: ''});
     };
@@ -180,7 +179,6 @@ export default function App() {
                             <label htmlFor="text-input" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                                 Introduce el texto aquí
                             </label>
-                            {/* MEJORA 3: Botón para limpiar el texto */}
                             <button onClick={handleClearText} className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition">
                                 Limpiar
                             </button>
@@ -193,7 +191,6 @@ export default function App() {
                             value={text}
                             onChange={(e) => setText(e.target.value)}
                         />
-                         {/* MEJORA 4: Contador de caracteres */}
                         <p className={`text-xs text-right mt-1 ${text.length > CHARACTER_LIMIT ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}`}>
                             {text.length} / {CHARACTER_LIMIT}
                         </p>
@@ -212,6 +209,21 @@ export default function App() {
                                 <option key={voice.value} value={voice.value}>{voice.label}</option>
                             ))}
                         </select>
+                    </div>
+
+                    {/* NUEVO CAMPO: Input para el tono o estilo */}
+                    <div>
+                        <label htmlFor="style-input" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Tono o Estilo (opcional)
+                        </label>
+                        <input
+                            type="text"
+                            id="style-input"
+                            className="w-full p-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                            placeholder="Ej: alegre, susurrando, como un robot..."
+                            value={stylePrompt}
+                            onChange={(e) => setStylePrompt(e.target.value)}
+                        />
                     </div>
                 </div>
 
@@ -239,7 +251,6 @@ export default function App() {
                     <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-4">
                         <p className="text-sm font-medium text-gray-700 dark:text-gray-300 text-center">Audio generado:</p>
                         <audio ref={audioRef} controls src={audioUrl} className="w-full"></audio>
-                        {/* MEJORA 5: Botón de descarga */}
                         <div className="text-center">
                             <a
                               href={audioUrl}

@@ -8,20 +8,18 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // --- Middlewares ---
-
-// Configuración de CORS para permitir solicitudes solo desde tu app en Vercel
 const corsOptions = {
-  origin: 'https://react-tts-app.vercel.app', // <== CORREGIDO: Guion cambiado por punto
+  origin: 'https://react-tts-app.vercel.app', 
   optionsSuccessStatus: 200 
 };
 app.use(cors(corsOptions));
-
 app.use(express.json());
 
 
 // --- Ruta de la API ---
 app.post('/api/generate-tts', async (req, res) => {
-    const { text, voice } = req.body;
+    // Recibir el nuevo campo 'style' desde el body
+    const { text, voice, style } = req.body;
     const apiKey = process.env.GOOGLE_API_KEY;
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
 
@@ -33,8 +31,14 @@ app.post('/api/generate-tts', async (req, res) => {
         return res.status(500).json({ error: 'La clave de API no está configurada en el servidor.' });
     }
     
+    // Construir el prompt final para la API
+    // Si el usuario especificó un estilo, se lo añadimos a la instrucción.
+    const finalText = style && style.trim() !== ''
+        ? `Dilo ${style}: ${text}`
+        : `Di esto con una voz clara y natural: ${text}`;
+
     const payload = {
-        contents: [{ parts: [{ text: `Di esto con una voz clara y natural: ${text}` }] }],
+        contents: [{ parts: [{ text: finalText }] }], // Usar el prompt final
         generationConfig: {
             responseModalities: ["AUDIO"],
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } }
@@ -77,4 +81,3 @@ app.post('/api/generate-tts', async (req, res) => {
 app.listen(PORT, () => {
     console.log(`Servidor escuchando en http://localhost:${PORT}`);
 });
-

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 
 // --- Funciones auxiliares para la conversión de audio ---
+
 function base64ToArrayBuffer(base64) {
     const binaryString = window.atob(base64);
     const len = binaryString.length;
@@ -48,6 +49,51 @@ function pcmToWav(pcmData, sampleRate) {
     return new Blob([view], { type: 'audio/wav' });
 }
 
+// **NUEVA FUNCIÓN**: Convierte un AudioBuffer procesado de vuelta a un Blob WAV.
+function audioBufferToWav(buffer) {
+    const numOfChan = buffer.numberOfChannels;
+    const length = buffer.length * numOfChan * 2 + 44;
+    const bufferArray = new ArrayBuffer(length);
+    const view = new DataView(bufferArray);
+    const channels = [];
+    let i;
+    let sample;
+    let offset = 0;
+    let pos = 0;
+
+    // Escribir el encabezado WAV
+    writeString(view, offset, 'RIFF'); offset += 4;
+    view.setUint32(offset, length - 8, true); offset += 4;
+    writeString(view, offset, 'WAVE'); offset += 4;
+    writeString(view, offset, 'fmt '); offset += 4;
+    view.setUint32(offset, 16, true); offset += 4;
+    view.setUint16(offset, 1, true); offset += 2;
+    view.setUint16(offset, numOfChan, true); offset += 2;
+    view.setUint32(offset, buffer.sampleRate, true); offset += 4;
+    view.setUint32(offset, buffer.sampleRate * 2 * numOfChan, true); offset += 4;
+    view.setUint16(offset, numOfChan * 2, true); offset += 2;
+    view.setUint16(offset, 16, true); offset += 2;
+    writeString(view, offset, 'data'); offset += 4;
+    view.setUint32(offset, length - pos - 4, true); offset += 4;
+
+    // Escribir los datos PCM
+    for (i = 0; i < buffer.numberOfChannels; i++) {
+        channels.push(buffer.getChannelData(i));
+    }
+
+    while (pos < buffer.length) {
+        for (i = 0; i < numOfChan; i++) {
+            sample = Math.max(-1, Math.min(1, channels[i][pos]));
+            sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
+            view.setInt16(offset, sample, true);
+            offset += 2;
+        }
+        pos++;
+    }
+
+    return new Blob([view], { type: 'audio/wav' });
+}
+
 
 // --- Componente principal de la aplicación ---
 export default function App() {
@@ -56,10 +102,12 @@ export default function App() {
     const [stylePrompt, setStylePrompt] = useState('');
     const [speakingRate, setSpeakingRate] = useState(1);
     const [isLoading, setIsLoading] = useState(false);
+    const [isProcessingDownload, setIsProcessingDownload] = useState(false);
     const [status, setStatus] = useState({ message: '', type: '' });
     const [audioUrl, setAudioUrl] = useState('');
     
     const audioRef = useRef(null);
+    const originalAudioBlob = useRef(null);
     const MAX_CHARS = 500;
     const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
 
@@ -92,13 +140,14 @@ export default function App() {
 
     const handleGenerate = async () => {
         if (!text.trim() || text.length > MAX_CHARS) {
-            setStatus({ message: "Por favor, introduce texto válido y no excedas el límite de caracteres.", type: "error" });
+            setStatus({ message: "Por favor, introduce texto válido y no excedas el límite.", type: "error" });
             return;
         }
 
         setIsLoading(true);
         setStatus({ message: '', type: '' });
         setAudioUrl('');
+        originalAudioBlob.current = null;
 
         try {
             const result = await callBackendApi(text, selectedVoice, stylePrompt);
@@ -110,8 +159,9 @@ export default function App() {
                 const pcmData = base64ToArrayBuffer(result.audioData);
                 const pcm16 = new Int16Array(pcmData);
                 const wavBlob = pcmToWav(pcm16, sampleRate);
-                const url = URL.createObjectURL(wavBlob);
+                originalAudioBlob.current = wavBlob; // Guardamos el blob original
                 
+                const url = URL.createObjectURL(wavBlob);
                 setAudioUrl(url);
                 setStatus({ message: "¡Audio generado con éxito!", type: "success" });
             }
@@ -130,7 +180,6 @@ export default function App() {
         }
     }, [audioUrl]);
 
-    // **NUEVO**: Efecto para cambiar la velocidad de reproducción en tiempo real
     useEffect(() => {
         if (audioRef.current) {
             audioRef.current.playbackRate = speakingRate;
@@ -140,17 +189,56 @@ export default function App() {
     const handleClear = () => {
         setText('');
         setAudioUrl('');
+        originalAudioBlob.current = null;
         setStatus({ message: '', type: '' });
     };
 
-    const handleDownload = () => {
-        if (audioUrl) {
-            const a = document.createElement('a');
-            a.href = audioUrl;
-            a.download = 'audio-generado.wav';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+    const triggerDownload = (blob, speed) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `audio-${speed.toFixed(1)}x.wav`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // **NUEVA FUNCIÓN**: Procesa y descarga el audio con la velocidad modificada.
+    const handleModifiedDownload = async () => {
+        if (!originalAudioBlob.current) return;
+
+        setIsProcessingDownload(true);
+        setStatus({ message: 'Procesando audio...', type: 'info' });
+
+        try {
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const arrayBuffer = await originalAudioBlob.current.arrayBuffer();
+            const originalBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+            const offlineCtx = new OfflineAudioContext(
+                originalBuffer.numberOfChannels,
+                originalBuffer.duration * originalBuffer.sampleRate / speakingRate,
+                originalBuffer.sampleRate
+            );
+
+            const source = offlineCtx.createBufferSource();
+            source.buffer = originalBuffer;
+            source.playbackRate.value = speakingRate;
+            source.connect(offlineCtx.destination);
+            source.start();
+
+            const processedBuffer = await offlineCtx.startRendering();
+            const processedWavBlob = audioBufferToWav(processedBuffer);
+            
+            triggerDownload(processedWavBlob, speakingRate);
+            setStatus({ message: '¡Descarga iniciada!', type: 'success' });
+
+        } catch (error) {
+            console.error("Error procesando el audio:", error);
+            setStatus({ message: `Error al procesar: ${error.message}`, type: "error" });
+        } finally {
+            setIsProcessingDownload(false);
         }
     };
 
@@ -163,7 +251,8 @@ export default function App() {
                 </div>
 
                 <div className="space-y-4">
-                    <div>
+                    {/* ... (resto del JSX de text area, selectores, etc. se mantiene igual) ... */}
+                     <div>
                         <div className="flex justify-between items-center mb-2">
                             <label htmlFor="text-input" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                                 Introduce el texto aquí
@@ -212,7 +301,7 @@ export default function App() {
                             />
                         </div>
                     </div>
-                    <div>
+                     <div>
                         <label htmlFor="speed-control" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                            Velocidad de Lectura: <span className="font-bold text-blue-500">{speakingRate.toFixed(1)}x</span>
                         </label>
@@ -232,17 +321,17 @@ export default function App() {
                 <div className="flex flex-col items-center justify-center space-y-4">
                     <button
                         onClick={handleGenerate}
-                        disabled={isLoading || text.length > MAX_CHARS}
+                        disabled={isLoading || isProcessingDownload || text.length > MAX_CHARS}
                         className="w-full md:w-auto px-8 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-300 ease-in-out transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {isLoading ? 'Generando...' : 'Generar Audio'}
                     </button>
-                    <div className="h-10 flex items-center justify-center">
-                        {isLoading && (
+                     <div className="h-10 flex items-center justify-center">
+                        {(isLoading || isProcessingDownload) && (
                              <div className="border-4 border-gray-200 border-t-blue-500 rounded-full w-8 h-8 animate-spin"></div>
                         )}
                         {status.message && (
-                            <p className={`text-center ${status.type === 'error' ? 'text-red-500' : 'text-green-500'}`}>
+                            <p className={`text-center ${status.type === 'error' ? 'text-red-500' : status.type === 'info' ? 'text-blue-500' : 'text-green-500'}`}>
                                 {status.message}
                             </p>
                         )}
@@ -253,18 +342,25 @@ export default function App() {
                     <div className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                         <p className="text-sm font-medium text-gray-700 dark:text-gray-300 text-center">Audio generado:</p>
                         <audio ref={audioRef} controls src={audioUrl} className="w-full"></audio>
-                        <div className="text-center">
+                        <div className="flex flex-col sm:flex-row gap-4 justify-center">
                              <button
-                                onClick={handleDownload}
-                                className="w-full md:w-auto px-6 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-300"
+                                onClick={() => triggerDownload(originalAudioBlob.current, 1.0)}
+                                disabled={isProcessingDownload}
+                                className="w-full sm:w-auto px-6 py-2 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition duration-300 disabled:opacity-50"
                             >
-                                Descargar Audio (a {speakingRate.toFixed(1)}x)
+                                Descargar (1.0x)
+                            </button>
+                             <button
+                                onClick={handleModifiedDownload}
+                                disabled={isProcessingDownload || speakingRate === 1}
+                                className="w-full sm:w-auto px-6 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {isProcessingDownload ? 'Procesando...' : `Descargar (${speakingRate.toFixed(1)}x)`}
                             </button>
                         </div>
-                        <p className="text-xs text-center text-gray-500 dark:text-gray-400">Nota: La descarga siempre será del audio a velocidad normal (1x).</p>
                     </div>
                 )}
             </div>
         </div>
     );
-                                }
+}

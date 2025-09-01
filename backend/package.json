@@ -1,16 +1,18 @@
 {
   "name": "tts-backend",
   "version": "1.0.0",
-  "description": "Backend server for the Text-to-Speech application.",
+  "description": "Servidor para la aplicación de Texto a Voz",
   "main": "server.js",
-  "type": "module",
   "scripts": {
     "start": "node server.js"
   },
+  "author": "",
+  "license": "ISC",
   "dependencies": {
-    "axios": "^1.7.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "node-fetch": "^2.7.0"
   }
 }
+

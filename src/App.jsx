@@ -102,11 +102,29 @@ export default function App() {
     const [isProcessingDownload, setIsProcessingDownload] = useState(false);
     const [status, setStatus] = useState({ message: '', type: '' });
     const [audioUrl, setAudioUrl] = useState('');
+    const [isSoundTouchReady, setIsSoundTouchReady] = useState(false); // **NUEVO ESTADO**
     
     const audioRef = useRef(null);
     const originalAudioBlob = useRef(null);
     const MAX_CHARS = 500;
     const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
+
+    // **NUEVO EFECTO**: Verifica si SoundTouch está disponible
+    useEffect(() => {
+        // La librería se carga en window, así que verificamos si existe.
+        if (typeof window.SoundTouch !== 'undefined') {
+            setIsSoundTouchReady(true);
+        } else {
+            // Reintentamos por si tarda en cargar
+            const interval = setInterval(() => {
+                if (typeof window.SoundTouch !== 'undefined') {
+                    setIsSoundTouchReady(true);
+                    clearInterval(interval);
+                }
+            }, 500);
+            return () => clearInterval(interval);
+        }
+    }, []);
 
     const voices = [
         { value: 'Zephyr', label: 'Zephyr (Brillante, Femenina)' },
@@ -201,23 +219,18 @@ export default function App() {
         URL.revokeObjectURL(url);
     }
 
-    // **NUEVA LÓGICA DE DESCARGA CON SOUNDTOUCHJS**
     const handleModifiedDownload = async () => {
-        if (!originalAudioBlob.current || typeof SoundTouch === 'undefined') {
-             setStatus({ message: "La librería de audio no está lista.", type: "error" });
-            return;
-        }
+        if (!originalAudioBlob.current) return;
 
         setIsProcessingDownload(true);
         setStatus({ message: 'Procesando audio (puede tardar)...', type: 'info' });
 
         try {
-            // Usamos un worker para no bloquear la interfaz principal
             const worker = new Worker(URL.createObjectURL(new Blob([`
                 self.importScripts('https://cdn.jsdelivr.net/npm/sound-touch-js@2.3.1/dist/sound-touch.js');
                 self.onmessage = (e) => {
                     const { buffer, sampleRate, tempo } = e.data;
-                    const soundtouch = new SoundTouch();
+                    const soundtouch = new self.SoundTouch();
                     soundtouch.tempo = tempo;
                     soundtouch.sampleRate = sampleRate;
                     
@@ -255,7 +268,6 @@ export default function App() {
                 worker.terminate();
                 setIsProcessingDownload(false);
             };
-
 
         } catch (error) {
             console.error("Error preparando el procesamiento de audio:", error);
@@ -373,15 +385,20 @@ export default function App() {
                             </button>
                              <button
                                 onClick={handleModifiedDownload}
-                                disabled={isProcessingDownload || speakingRate === 1}
+                                // **LÓGICA MODIFICADA**: El botón se deshabilita si la librería no está lista
+                                disabled={isProcessingDownload || speakingRate === 1 || !isSoundTouchReady}
                                 className="w-full sm:w-auto px-6 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                                title={!isSoundTouchReady ? "La librería de procesamiento de audio aún está cargando." : ""}
                             >
                                 {isProcessingDownload ? 'Procesando...' : `Tono Corregido (${speakingRate.toFixed(1)}x)`}
                             </button>
                         </div>
+                         {!isSoundTouchReady && audioUrl && (
+                            <p className="text-xs text-center text-yellow-500">Cargando procesador de audio de alta calidad...</p>
+                        )}
                     </div>
                 )}
             </div>
         </div>
     );
-        }
+}

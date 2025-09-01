@@ -11,7 +11,7 @@ import React, { useState, useRef, useEffect } from 'react';
 function base64ToArrayBuffer(base64) {
     const binaryString = window.atob(base64);
     const len = binaryString.length;
-    const bytes = new Uint8Array(len); // <<< CORREGIDO: UintArray -> Uint8Array
+    const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) {
         bytes[i] = binaryString.charCodeAt(i);
     }
@@ -72,27 +72,34 @@ function pcmToWav(pcmData, sampleRate) {
 
 // --- Componente principal de la aplicación ---
 export default function App() {
-    const [text, setText] = useState('Hola, ¿cómo estás hoy?');
-    const [selectedVoice, setSelectedVoice] = useState('Zephyr');
+    const [text, setText] = useState('Hola, el clima para hoy en Esperanza, Santa Fe será soleado con una máxima de 25 grados.');
+    const [selectedVoice, setSelectedVoice] = useState('Kore');
     const [isLoading, setIsLoading] = useState(false);
     const [status, setStatus] = useState({ message: '', type: '' });
     const [audioUrl, setAudioUrl] = useState('');
-    
     const audioRef = useRef(null);
+    const CHARACTER_LIMIT = 500;
 
+    // MEJORA 1: Lista de voces ampliada y más descriptiva
     const voices = [
-        { value: 'Zephyr', label: 'Zephyr (Brillante)' },
-        { value: 'Puck', label: 'Puck (Animada)' },
-        { value: 'Charon', label: 'Charon (Informativa)' },
-        { value: 'Kore', label: 'Kore (Firme)' },
-        { value: 'Fenrir', label: 'Fenrir (Entusiasta)' },
-        { value: 'Leda', label: 'Leda (Juvenil)' },
-        { value: 'Sadachbia', label: 'Sadachbia (Vivaz)' },
-        { value: 'Sulafat', label: 'Sulafat (Cálida)' },
+        // Voces Masculinas
+        { value: 'Puck', label: 'Puck (Animada, Masculina)' },
+        { value: 'Charon', label: 'Charon (Informativa, Masculina)' },
+        { value: 'Fenrir', label: 'Fenrir (Entusiasta, Masculina)' },
+        { value: 'Orus', label: 'Orus (Firme, Masculina)' },
+        { value: 'Algenib', label: 'Algenib (Grave, Masculina)' },
+        { value: 'Sadaltager', label: 'Sadaltager (Experta, Masculina)' },
+        // Voces Femeninas
+        { value: 'Kore', label: 'Kore (Firme, Femenina)' },
+        { value: 'Zephyr', label: 'Zephyr (Brillante, Femenina)' },
+        { value: 'Leda', label: 'Leda (Juvenil, Femenina)' },
+        { value: 'Aoede', label: 'Aoede (Fresca, Femenina)' },
+        { value: 'Autonoe', label: 'Autonoe (Brillante, Femenina)' },
+        { value: 'Sulafat', label: 'Sulafat (Cálida, Femenina)' },
     ];
 
-    // Llama a nuestro propio backend en lugar de a la API de Google directamente
     const callBackendApi = async (textToSpeak, voice) => {
+        // Se revirtió el cambio para asegurar la compatibilidad.
         const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts'; // URL de producción
 
         const response = await fetch(backendUrl, {
@@ -112,6 +119,10 @@ export default function App() {
     const handleGenerate = async () => {
         if (!text.trim()) {
             setStatus({ message: "Por favor, introduce algún texto.", type: "error" });
+            return;
+        }
+        if (text.length > CHARACTER_LIMIT) {
+            setStatus({ message: `El texto no puede superar los ${CHARACTER_LIMIT} caracteres.`, type: "error"});
             return;
         }
 
@@ -149,6 +160,12 @@ export default function App() {
         }
     }, [audioUrl]);
 
+    const handleClearText = () => {
+        setText('');
+        setAudioUrl('');
+        setStatus({ message: '', type: ''});
+    };
+
     return (
         <div className="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex items-center justify-center min-h-screen p-4 font-sans">
             <div className="w-full max-w-2xl bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
@@ -159,9 +176,15 @@ export default function App() {
 
                 <div className="space-y-4">
                     <div>
-                        <label htmlFor="text-input" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Introduce el texto aquí
-                        </label>
+                        <div className="flex justify-between items-center mb-2">
+                            <label htmlFor="text-input" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                Introduce el texto aquí
+                            </label>
+                            {/* MEJORA 3: Botón para limpiar el texto */}
+                            <button onClick={handleClearText} className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition">
+                                Limpiar
+                            </button>
+                        </div>
                         <textarea
                             id="text-input"
                             rows="6"
@@ -170,6 +193,10 @@ export default function App() {
                             value={text}
                             onChange={(e) => setText(e.target.value)}
                         />
+                         {/* MEJORA 4: Contador de caracteres */}
+                        <p className={`text-xs text-right mt-1 ${text.length > CHARACTER_LIMIT ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}`}>
+                            {text.length} / {CHARACTER_LIMIT}
+                        </p>
                     </div>
                     <div>
                         <label htmlFor="voice-select" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -191,7 +218,7 @@ export default function App() {
                 <div className="flex flex-col items-center justify-center space-y-4">
                     <button
                         onClick={handleGenerate}
-                        disabled={isLoading}
+                        disabled={isLoading || text.length > CHARACTER_LIMIT}
                         className="w-full md:w-auto px-8 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-300 ease-in-out transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {isLoading ? 'Generando...' : 'Generar Audio'}
@@ -201,7 +228,7 @@ export default function App() {
                              <div className="border-4 border-gray-200 border-t-blue-500 rounded-full w-8 h-8 animate-spin"></div>
                         )}
                         {status.message && (
-                            <p className={status.type === 'error' ? 'text-red-500' : 'text-green-500'}>
+                            <p className={`text-sm text-center ${status.type === 'error' ? 'text-red-500' : 'text-green-500'}`}>
                                 {status.message}
                             </p>
                         )}
@@ -209,9 +236,19 @@ export default function App() {
                 </div>
 
                 {audioUrl && (
-                    <div className="space-y-2">
+                    <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-4">
                         <p className="text-sm font-medium text-gray-700 dark:text-gray-300 text-center">Audio generado:</p>
                         <audio ref={audioRef} controls src={audioUrl} className="w-full"></audio>
+                        {/* MEJORA 5: Botón de descarga */}
+                        <div className="text-center">
+                            <a
+                              href={audioUrl}
+                              download="audio_generado.wav"
+                              className="inline-block px-6 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-300"
+                            >
+                                Descargar Audio (WAV)
+                            </a>
+                        </div>
                     </div>
                 )}
             </div>

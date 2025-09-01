@@ -19,7 +19,6 @@ function writeString(view, offset, string) {
 }
 
 function pcmToWav(pcmData, sampleRate) {
-    // ... (código sin cambios)
     const numSamples = pcmData.length;
     const numChannels = 1;
     const bytesPerSample = 2;
@@ -51,7 +50,6 @@ function pcmToWav(pcmData, sampleRate) {
 }
 
 function audioBufferToWav(buffer) {
-    // ... (código sin cambios)
     const numOfChan = buffer.numberOfChannels;
     const length = buffer.length * numOfChan * 2 + 44;
     const bufferArray = new ArrayBuffer(length);
@@ -107,11 +105,17 @@ export default function App() {
     const MAX_CHARS = 500;
     const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
     
-    // **LÓGICA DEL WORKER MEJORADA**
     useEffect(() => {
-        // Obtenemos el código de la librería una sola vez
-        fetch('https://cdn.jsdelivr.net/npm/sound-touch-js@2.3.1/dist/sound-touch.js')
-            .then(response => response.text())
+        // **URL DEL CDN CORREGIDA**
+        const soundTouchUrl = 'https://unpkg.com/sound-touch-js@2.3.1/dist/sound-touch.js';
+        
+        fetch(soundTouchUrl)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`Error HTTP al cargar el script: ${response.status}`);
+                }
+                return response.text();
+            })
             .then(scriptText => {
                 const workerScript = `
                     ${scriptText}
@@ -143,7 +147,6 @@ export default function App() {
 
 
     const voices = [
-        // ... (voces sin cambios)
         { value: 'Zephyr', label: 'Zephyr (Brillante, Femenina)' },
         { value: 'Puck', label: 'Puck (Animada, Masculina)' },
         { value: 'Charon', label: 'Charon (Informativa, Masculina)' },
@@ -171,7 +174,6 @@ export default function App() {
     };
 
     const handleGenerate = async () => {
-        // ... (lógica sin cambios)
         if (!text.trim() || text.length > MAX_CHARS) {
             setStatus({ message: "Por favor, introduce texto válido y no excedas el límite.", type: "error" });
             return;
@@ -288,7 +290,6 @@ export default function App() {
                 </div>
 
                 <div className="space-y-4">
-                    {/* ... (inputs sin cambios) */}
                      <div>
                         <div className="flex justify-between items-center mb-2">
                             <label htmlFor="text-input" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -400,4 +401,4 @@ export default function App() {
             </div>
         </div>
     );
-                }
+}

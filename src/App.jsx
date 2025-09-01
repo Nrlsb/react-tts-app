@@ -102,7 +102,7 @@ export default function App() {
     const audioRef = useRef(null);
     const originalAudioBlob = useRef(null);
     const workerRef = useRef(null);
-    const MAX_CHARS = 500;
+    const MAX_CHARS = 5000;
     const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
     
     useEffect(() => {

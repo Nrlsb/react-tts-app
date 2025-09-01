@@ -106,17 +106,12 @@ export default function App() {
     const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
     
     useEffect(() => {
-        // *** SOLUCIÓN DEFINITIVA: Cargar el script desde la carpeta `public` del proyecto. ***
-        // Esto asegura que el archivo se sirve desde el mismo origen que la aplicación,
-        // eliminando cualquier problema de CORS, firewall o bloqueo de red.
-        const soundTouchUrl = '/sound-touch.js';
+        const soundTouchUrl = new URL('/sound-touch.js', window.location.origin).href;
 
         const workerScript = `
             try {
-                // Cargar la librería SoundTouch desde la ruta local.
                 importScripts('${soundTouchUrl}');
             } catch (e) {
-                // Si falla, notificar al hilo principal.
                 self.postMessage({ error: 'No se pudo cargar la librería de procesamiento de audio.' });
                 throw e; 
             }
@@ -412,4 +407,4 @@ export default function App() {
             </div>
         </div>
     );
-         }
+                    }

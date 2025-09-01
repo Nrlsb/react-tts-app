@@ -31,18 +31,24 @@ app.post('/api/generate-tts', async (req, res) => {
         return res.status(500).json({ error: 'La clave de API no está configurada en el servidor.' });
     }
     
-    // Construir el prompt final para la API
-    const finalText = style && style.trim() !== ''
-        ? `Dilo ${style}: ${text}`
-        : `Di esto con una voz clara y natural: ${text}`;
-
-    // Añadimos 'speakingRate' a la configuración de la petición a la API de Gemini
+    // --- Lógica de Prompt Mejorada ---
+    // Construimos las instrucciones de forma más clara para el modelo.
+    let instruction = '';
+    if (style && style.trim() !== '') {
+        instruction += `Dilo ${style}. `;
+    }
+    if (speakingRate && speakingRate !== 1.0) {
+        // Añadimos la instrucción de velocidad directamente en el prompt
+        instruction += `Léelo a ${speakingRate.toFixed(1)} veces la velocidad normal. `;
+    }
+    const finalText = instruction + `Di esto: ${text}`;
+    
+    // El payload ya no necesita 'speakingRate' en speechConfig
     const payload = {
         contents: [{ parts: [{ text: finalText }] }],
         generationConfig: {
             responseModalities: ["AUDIO"],
             speechConfig: { 
-                speakingRate: speakingRate, // Aquí se establece la velocidad
                 voiceConfig: { 
                     prebuiltVoiceConfig: { voiceName: voice } 
                 } 
@@ -86,3 +92,4 @@ app.post('/api/generate-tts', async (req, res) => {
 app.listen(PORT, () => {
     console.log(`Servidor escuchando en http://localhost:${PORT}`);
 });
+

@@ -106,44 +106,47 @@ export default function App() {
     const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
     
     useEffect(() => {
-        // **URL DEL CDN CORREGIDA**
+        // URL de la librería SoundTouch en el CDN
         const soundTouchUrl = 'https://unpkg.com/sound-touch-js@2.3.1/dist/sound-touch.js';
-        
-        fetch(soundTouchUrl)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`Error HTTP al cargar el script: ${response.status}`);
-                }
-                return response.text();
-            })
-            .then(scriptText => {
-                const workerScript = `
-                    ${scriptText}
-                    self.onmessage = (e) => {
-                        const { buffer, sampleRate, tempo } = e.data;
-                        const soundtouch = new self.SoundTouch();
-                        soundtouch.tempo = tempo;
-                        soundtouch.sampleRate = sampleRate;
-                        
-                        const node = soundtouch.createNode(buffer, soundtouch.bufferSize);
-                        const result = node.getSamples();
-                        self.postMessage(result);
-                    };
-                `;
-                const blob = new Blob([workerScript], { type: 'application/javascript' });
-                workerRef.current = new Worker(URL.createObjectURL(blob));
-            })
-            .catch(error => {
-                console.error("No se pudo precargar la librería para el worker:", error);
-                setStatus({ message: "No se pudo cargar la librería de procesamiento.", type: "error" });
-            });
 
+        // El script del worker ahora usará importScripts() para cargar la librería.
+        // Esta es la forma estándar y correcta de cargar scripts externos en un worker
+        // y evita el problema de CORS que estabas experimentando.
+        const workerScript = `
+            // Cargar la librería SoundTouch desde el CDN
+            importScripts('${soundTouchUrl}');
+
+            // Este código se ejecutará solo después de que sound-touch.js se haya cargado y ejecutado.
+            self.onmessage = (e) => {
+                const { buffer, sampleRate, tempo } = e.data;
+                
+                // La clase 'SoundTouch' ahora está disponible globalmente dentro del worker
+                // gracias a importScripts().
+                const soundtouch = new self.SoundTouch();
+                soundtouch.tempo = tempo;
+                soundtouch.sampleRate = sampleRate;
+                
+                const node = soundtouch.createNode(buffer, soundtouch.bufferSize);
+                const result = node.getSamples();
+                self.postMessage(result);
+            };
+        `;
+        
+        try {
+            const blob = new Blob([workerScript], { type: 'application/javascript' });
+            workerRef.current = new Worker(URL.createObjectURL(blob));
+        } catch (error) {
+            console.error("No se pudo crear el worker:", error);
+            setStatus({ message: "No se pudo inicializar el procesador de audio.", type: "error" });
+        }
+
+        // Función de limpieza para terminar el worker cuando el componente se desmonte.
         return () => {
             if (workerRef.current) {
                 workerRef.current.terminate();
             }
         };
-    }, []);
+    }, []); // El array de dependencias vacío asegura que esto se ejecute solo una vez.
 
 
     const voices = [
@@ -401,4 +404,4 @@ export default function App() {
             </div>
         </div>
     );
-}
+        }

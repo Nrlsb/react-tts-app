@@ -18,8 +18,8 @@ app.use(express.json());
 
 // --- Ruta de la API ---
 app.post('/api/generate-tts', async (req, res) => {
-    // Recibir los nuevos campos 'style' y 'speakingRate' desde el body
-    const { text, voice, style, speakingRate } = req.body;
+    // Ya no recibimos 'speakingRate' aquí
+    const { text, voice, style } = req.body;
     const apiKey = process.env.GOOGLE_API_KEY;
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
 
@@ -36,25 +36,15 @@ app.post('/api/generate-tts', async (req, res) => {
         ? `Dilo ${style}: ${text}`
         : `Di esto con una voz clara y natural: ${text}`;
 
-    // CORRECCIÓN: Construir la configuración de la voz.
-    // El parámetro speakingRate debe ir dentro de voiceConfig.
-    const voiceConfig = {
-        prebuiltVoiceConfig: {
-            voiceName: voice
-        }
-    };
-
-    // Añadir speakingRate a voiceConfig solo si se proporciona un valor numérico válido
-    if (speakingRate && !isNaN(speakingRate)) {
-        voiceConfig.speakingRate = parseFloat(speakingRate);
-    }
-
+    // La petición a la API ahora es más simple, sin configuración de velocidad
     const payload = {
         contents: [{ parts: [{ text: finalText }] }],
         generationConfig: {
             responseModalities: ["AUDIO"],
-            speechConfig: {
-                voiceConfig: voiceConfig
+            speechConfig: { 
+                voiceConfig: { 
+                    prebuiltVoiceConfig: { voiceName: voice } 
+                } 
             }
         },
         model: "gemini-2.5-flash-preview-tts"
@@ -95,4 +85,3 @@ app.post('/api/generate-tts', async (req, res) => {
 app.listen(PORT, () => {
     console.log(`Servidor escuchando en http://localhost:${PORT}`);
 });
-

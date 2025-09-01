@@ -90,41 +90,6 @@ function audioBufferToWav(buffer) {
     return new Blob([view], { type: 'audio/wav' });
 }
 
-// --- Hook Personalizado para SoundTouch ---
-const useSoundTouch = () => {
-    const [isReady, setIsReady] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
-
-    const load = async () => {
-        if (isReady || isLoading) return true;
-        if (typeof window.SoundTouch !== 'undefined') {
-            setIsReady(true);
-            return true;
-        }
-
-        setIsLoading(true);
-        try {
-            await new Promise((resolve, reject) => {
-                const script = document.createElement('script');
-                script.src = 'https://cdn.jsdelivr.net/npm/sound-touch-js@2.3.1/dist/sound-touch.js';
-                script.onload = () => resolve();
-                script.onerror = () => reject(new Error('Falló la carga de SoundTouchJS'));
-                document.body.appendChild(script);
-            });
-            setIsReady(true);
-            return true;
-        } catch (error) {
-            console.error(error);
-            return false;
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    return { isSoundTouchReady: isReady, isSoundTouchLoading: isLoading, loadSoundTouch: load };
-};
-
-
 // --- Componente principal de la aplicación ---
 export default function App() {
     const [text, setText] = useState('Hola, el clima para hoy en Esperanza, Santa Fe será soleado con una máxima de 25 grados.');
@@ -138,10 +103,44 @@ export default function App() {
     
     const audioRef = useRef(null);
     const originalAudioBlob = useRef(null);
+    const workerRef = useRef(null);
     const MAX_CHARS = 500;
     const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
+    
+    // **LÓGICA DEL WORKER MEJORADA**
+    useEffect(() => {
+        // Obtenemos el código de la librería una sola vez
+        fetch('https://cdn.jsdelivr.net/npm/sound-touch-js@2.3.1/dist/sound-touch.js')
+            .then(response => response.text())
+            .then(scriptText => {
+                const workerScript = `
+                    ${scriptText}
+                    self.onmessage = (e) => {
+                        const { buffer, sampleRate, tempo } = e.data;
+                        const soundtouch = new self.SoundTouch();
+                        soundtouch.tempo = tempo;
+                        soundtouch.sampleRate = sampleRate;
+                        
+                        const node = soundtouch.createNode(buffer, soundtouch.bufferSize);
+                        const result = node.getSamples();
+                        self.postMessage(result);
+                    };
+                `;
+                const blob = new Blob([workerScript], { type: 'application/javascript' });
+                workerRef.current = new Worker(URL.createObjectURL(blob));
+            })
+            .catch(error => {
+                console.error("No se pudo precargar la librería para el worker:", error);
+                setStatus({ message: "No se pudo cargar la librería de procesamiento.", type: "error" });
+            });
 
-    const { isSoundTouchReady, isSoundTouchLoading, loadSoundTouch } = useSoundTouch();
+        return () => {
+            if (workerRef.current) {
+                workerRef.current.terminate();
+            }
+        };
+    }, []);
+
 
     const voices = [
         // ... (voces sin cambios)
@@ -237,45 +236,26 @@ export default function App() {
     }
 
     const handleModifiedDownload = async () => {
-        if (!originalAudioBlob.current) return;
-        
-        setStatus({ message: 'Preparando descarga...', type: 'info' });
-
-        const isLoaded = await loadSoundTouch();
-        if (!isLoaded) {
-            setStatus({ message: 'Error al cargar librería de audio.', type: 'error' });
+        if (!originalAudioBlob.current || !workerRef.current) {
+            setStatus({ message: 'El procesador de audio no está listo. Inténtalo de nuevo.', type: 'error' });
             return;
         }
-        
+    
         setIsProcessingDownload(true);
         setStatus({ message: 'Procesando audio (puede tardar)...', type: 'info' });
 
         try {
-            const worker = new Worker(URL.createObjectURL(new Blob([`
-                self.importScripts('https://cdn.jsdelivr.net/npm/sound-touch-js@2.3.1/dist/sound-touch.js');
-                self.onmessage = (e) => {
-                    const { buffer, sampleRate, tempo } = e.data;
-                    const soundtouch = new self.SoundTouch();
-                    soundtouch.tempo = tempo;
-                    soundtouch.sampleRate = sampleRate;
-                    
-                    const node = soundtouch.createNode(buffer, soundtouch.bufferSize);
-                    const result = node.getSamples();
-                    self.postMessage(result);
-                };
-            `], { type: 'application/javascript' })));
-
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             const arrayBuffer = await originalAudioBlob.current.arrayBuffer();
             const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
             
-            worker.postMessage({
+            workerRef.current.postMessage({
                 buffer: audioBuffer.getChannelData(0),
                 sampleRate: audioBuffer.sampleRate,
                 tempo: speakingRate
             });
 
-            worker.onmessage = (e) => {
+            workerRef.current.onmessage = (e) => {
                 const processedSamples = e.data;
                 const newAudioBuffer = audioCtx.createBuffer(1, processedSamples.length, audioBuffer.sampleRate);
                 newAudioBuffer.copyToChannel(processedSamples, 0);
@@ -283,14 +263,12 @@ export default function App() {
                 const processedWavBlob = audioBufferToWav(newAudioBuffer);
                 triggerDownload(processedWavBlob, speakingRate);
                 setStatus({ message: '¡Descarga de alta calidad iniciada!', type: 'success' });
-                worker.terminate();
                 setIsProcessingDownload(false);
             };
 
-            worker.onerror = (err) => {
+            workerRef.current.onerror = (err) => {
                 console.error("Error en el Worker de audio:", err);
                 setStatus({ message: `Error al procesar: ${err.message}`, type: "error" });
-                worker.terminate();
                 setIsProcessingDownload(false);
             };
 
@@ -386,7 +364,7 @@ export default function App() {
                         {isLoading ? 'Generando...' : 'Generar Audio'}
                     </button>
                      <div className="h-10 flex items-center justify-center">
-                        {(isLoading || isProcessingDownload || isSoundTouchLoading) && (
+                        {(isLoading || isProcessingDownload) && (
                              <div className="border-4 border-gray-200 border-t-blue-500 rounded-full w-8 h-8 animate-spin"></div>
                         )}
                         {status.message && (
@@ -404,17 +382,17 @@ export default function App() {
                         <div className="flex flex-col sm:flex-row gap-4 justify-center">
                              <button
                                 onClick={() => triggerDownload(originalAudioBlob.current, 1.0)}
-                                disabled={isProcessingDownload || isSoundTouchLoading}
+                                disabled={isProcessingDownload}
                                 className="w-full sm:w-auto px-6 py-2 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition duration-300 disabled:opacity-50"
                             >
                                 Original (1.0x)
                             </button>
                              <button
                                 onClick={handleModifiedDownload}
-                                disabled={isProcessingDownload || speakingRate === 1 || isSoundTouchLoading}
+                                disabled={isProcessingDownload || speakingRate === 1 || !workerRef.current}
                                 className="w-full sm:w-auto px-6 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                {isProcessingDownload || isSoundTouchLoading ? 'Procesando...' : `Tono Corregido (${speakingRate.toFixed(1)}x)`}
+                                {isProcessingDownload ? 'Procesando...' : `Tono Corregido (${speakingRate.toFixed(1)}x)`}
                             </button>
                         </div>
                     </div>
@@ -422,4 +400,4 @@ export default function App() {
             </div>
         </div>
     );
-        }
+                }

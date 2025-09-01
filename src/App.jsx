@@ -73,8 +73,9 @@ function pcmToWav(pcmData, sampleRate) {
 // --- Componente principal de la aplicación ---
 export default function App() {
     const [text, setText] = useState('Hola, el clima para hoy en Esperanza, Santa Fe será soleado con una máxima de 25 grados.');
-    const [stylePrompt, setStylePrompt] = useState(''); // Estado para el tono/estilo
+    const [stylePrompt, setStylePrompt] = useState('');
     const [selectedVoice, setSelectedVoice] = useState('Kore');
+    const [speakingRate, setSpeakingRate] = useState(1.0); // Estado para la velocidad de lectura
     const [isLoading, setIsLoading] = useState(false);
     const [status, setStatus] = useState({ message: '', type: '' });
     const [audioUrl, setAudioUrl] = useState('');
@@ -98,13 +99,18 @@ export default function App() {
         { value: 'Sulafat', label: 'Sulafat (Cálida, Femenina)' },
     ];
 
-    const callBackendApi = async (textToSpeak, voice, style) => {
-        const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts'; 
+    const callBackendApi = async (textToSpeak, voice, style, rate) => {
+        const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
 
         const response = await fetch(backendUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: textToSpeak, voice: voice, style: style }) // Enviar el estilo al backend
+            body: JSON.stringify({
+                text: textToSpeak,
+                voice: voice,
+                style: style,
+                speakingRate: rate // Enviar la velocidad
+            })
         });
 
         if (!response.ok) {
@@ -130,7 +136,7 @@ export default function App() {
         setAudioUrl('');
 
         try {
-            const result = await callBackendApi(text, selectedVoice, stylePrompt); // Pasar el estilo a la función
+            const result = await callBackendApi(text, selectedVoice, stylePrompt, speakingRate);
             if (result && result.audioData) {
                 const mimeType = result.mimeType || 'audio/L16; rate=24000';
                 const sampleRateMatch = mimeType.match(/rate=(\d+)/);
@@ -195,39 +201,58 @@ export default function App() {
                             {text.length} / {CHARACTER_LIMIT}
                         </p>
                     </div>
-                    <div>
-                        <label htmlFor="voice-select" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Selecciona una voz
-                        </label>
-                        <select
-                            id="voice-select"
-                            className="w-full p-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-                            value={selectedVoice}
-                            onChange={(e) => setSelectedVoice(e.target.value)}
-                        >
-                            {voices.map(voice => (
-                                <option key={voice.value} value={voice.value}>{voice.label}</option>
-                            ))}
-                        </select>
-                    </div>
 
-                    {/* NUEVO CAMPO: Input para el tono o estilo */}
+                    {/* Contenedor para selectores */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label htmlFor="voice-select" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Voz
+                            </label>
+                            <select
+                                id="voice-select"
+                                className="w-full p-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                                value={selectedVoice}
+                                onChange={(e) => setSelectedVoice(e.target.value)}
+                            >
+                                {voices.map(voice => (
+                                    <option key={voice.value} value={voice.value}>{voice.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label htmlFor="style-input" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Tono o Estilo (opcional)
+                            </label>
+                            <input
+                                type="text"
+                                id="style-input"
+                                className="w-full p-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                                placeholder="Ej: alegre, susurrando..."
+                                value={stylePrompt}
+                                onChange={(e) => setStylePrompt(e.target.value)}
+                            />
+                        </div>
+                    </div>
+                    
+                    {/* NUEVO CAMPO: Slider para la velocidad */}
                     <div>
-                        <label htmlFor="style-input" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Tono o Estilo (opcional)
+                        <label htmlFor="speed-slider" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Velocidad de Lectura: <span className="font-bold text-blue-500">{speakingRate.toFixed(1)}x</span>
                         </label>
                         <input
-                            type="text"
-                            id="style-input"
-                            className="w-full p-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-                            placeholder="Ej: alegre, susurrando, como un robot..."
-                            value={stylePrompt}
-                            onChange={(e) => setStylePrompt(e.target.value)}
+                            type="range"
+                            id="speed-slider"
+                            min="0.5"
+                            max="2.0"
+                            step="0.1"
+                            value={speakingRate}
+                            onChange={(e) => setSpeakingRate(parseFloat(e.target.value))}
+                            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-600 accent-blue-600"
                         />
                     </div>
                 </div>
 
-                <div className="flex flex-col items-center justify-center space-y-4">
+                <div className="flex flex-col items-center justify-center space-y-4 pt-4">
                     <button
                         onClick={handleGenerate}
                         disabled={isLoading || text.length > CHARACTER_LIMIT}

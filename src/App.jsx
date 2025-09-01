@@ -49,45 +49,6 @@ function pcmToWav(pcmData, sampleRate) {
     return new Blob([view], { type: 'audio/wav' });
 }
 
-function audioBufferToWav(buffer) {
-    const numOfChan = buffer.numberOfChannels;
-    const length = buffer.length * numOfChan * 2 + 44;
-    const bufferArray = new ArrayBuffer(length);
-    const view = new DataView(bufferArray);
-    const channels = [];
-    let i, sample, offset = 0, pos = 0;
-
-    writeString(view, offset, 'RIFF'); offset += 4;
-    view.setUint32(offset, length - 8, true); offset += 4;
-    writeString(view, offset, 'WAVE'); offset += 4;
-    writeString(view, offset, 'fmt '); offset += 4;
-    view.setUint32(offset, 16, true); offset += 4;
-    view.setUint16(offset, 1, true); offset += 2;
-    view.setUint16(offset, numOfChan, true); offset += 2;
-    view.setUint32(offset, buffer.sampleRate, true); offset += 4;
-    view.setUint32(offset, buffer.sampleRate * 2 * numOfChan, true); offset += 4;
-    view.setUint16(offset, numOfChan * 2, true); offset += 2;
-    view.setUint16(offset, 16, true); offset += 2;
-    writeString(view, offset, 'data'); offset += 4;
-    view.setUint32(offset, length - pos - 4, true); offset += 4;
-
-    for (i = 0; i < buffer.numberOfChannels; i++) {
-        channels.push(buffer.getChannelData(i));
-    }
-
-    while (pos < buffer.length) {
-        for (i = 0; i < numOfChan; i++) {
-            sample = Math.max(-1, Math.min(1, channels[i][pos]));
-            sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
-            view.setInt16(offset, sample, true);
-            offset += 2;
-        }
-        pos++;
-    }
-
-    return new Blob([view], { type: 'audio/wav' });
-}
-
 // --- Componente principal de la aplicación ---
 export default function App() {
     const [text, setText] = useState('Hola, el clima para hoy en Esperanza, Santa Fe será soleado con una máxima de 25 grados.');
@@ -95,12 +56,10 @@ export default function App() {
     const [stylePrompt, setStylePrompt] = useState('');
     const [speakingRate, setSpeakingRate] = useState(1);
     const [isLoading, setIsLoading] = useState(false);
-    const [isProcessingDownload, setIsProcessingDownload] = useState(false);
     const [status, setStatus] = useState({ message: '', type: '' });
     const [audioUrl, setAudioUrl] = useState('');
     
     const audioRef = useRef(null);
-    const originalAudioBlob = useRef(null);
     const MAX_CHARS = 5000;
     const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
 
@@ -117,11 +76,11 @@ export default function App() {
         { value: 'Sulafat', label: 'Sulafat (Cálida, Femenina)' },
     ];
 
-    const callBackendApi = async (textToSpeak, voice, style) => {
+    const callBackendApi = async (textToSpeak, voice, style, rate) => {
         const response = await fetch(backendUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: textToSpeak, voice, style })
+            body: JSON.stringify({ text: textToSpeak, voice, style, speakingRate: rate })
         });
 
         if (!response.ok) {
@@ -139,9 +98,8 @@ export default function App() {
         setIsLoading(true);
         setStatus({ message: '', type: '' });
         setAudioUrl('');
-        originalAudioBlob.current = null;
         try {
-            const result = await callBackendApi(text, selectedVoice, stylePrompt);
+            const result = await callBackendApi(text, selectedVoice, stylePrompt, speakingRate);
             if (result && result.audioData) {
                 const mimeType = result.mimeType || 'audio/L16; rate=24000';
                 const sampleRateMatch = mimeType.match(/rate=(\d+)/);
@@ -150,7 +108,6 @@ export default function App() {
                 const pcmData = base64ToArrayBuffer(result.audioData);
                 const pcm16 = new Int16Array(pcmData);
                 const wavBlob = pcmToWav(pcm16, sampleRate);
-                originalAudioBlob.current = wavBlob;
                 
                 const url = URL.createObjectURL(wavBlob);
                 setAudioUrl(url);
@@ -166,99 +123,14 @@ export default function App() {
     
     useEffect(() => {
         if (audioUrl && audioRef.current) {
-            audioRef.current.playbackRate = speakingRate;
             audioRef.current.play();
         }
     }, [audioUrl]);
 
-    useEffect(() => {
-        if (audioRef.current) {
-            audioRef.current.playbackRate = speakingRate;
-        }
-    }, [speakingRate]);
-
     const handleClear = () => {
         setText('');
         setAudioUrl('');
-        originalAudioBlob.current = null;
         setStatus({ message: '', type: '' });
-    };
-
-    const triggerDownload = (blob, speed) => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `audio-HQ-${speed.toFixed(1)}x.wav`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    }
-
-    const handleModifiedDownload = async () => {
-        if (!originalAudioBlob.current) {
-             setStatus({ message: 'No hay audio original para procesar.', type: 'error' });
-            return;
-        }
-        if (typeof SoundTouch === 'undefined') {
-             setStatus({ message: 'La librería de audio no se ha cargado correctamente.', type: 'error' });
-            return;
-        }
-    
-        setIsProcessingDownload(true);
-        setStatus({ message: 'Procesando audio (la página puede congelarse)...', type: 'info' });
-
-        setTimeout(async () => {
-            try {
-                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const arrayBuffer = await originalAudioBlob.current.arrayBuffer();
-                const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-                const monoBuffer = audioBuffer.getChannelData(0);
-
-                // --- INICIO: Lógica de procesamiento con SoundTouch (Corregida) ---
-                
-                // 1. Crear la instancia de SoundTouch.
-                const soundTouch = new SoundTouch();
-                
-                // 2. Configurar los parámetros.
-                soundTouch.tempo = speakingRate;
-                soundtouch.sampleRate = audioBuffer.sampleRate;
-                soundtouch.pitch = 1.0;
-
-                // 3. Crear un "Filter" que procesará el audio.
-                // Esta versión de la librería espera un buffer estéreo, así que lo simulamos.
-                const stereoBuffer = new Float32Array(monoBuffer.length * 2);
-                for(let i = 0; i < monoBuffer.length; i++) {
-                    stereoBuffer[i*2] = stereoBuffer[i*2+1] = monoBuffer[i];
-                }
-
-                const simpleFilter = soundTouch.createSimpleFilter(stereoBuffer, 2, audioBuffer.sampleRate);
-                
-                // 4. Extraer todos los samples procesados.
-                const processedSamplesStereo = simpleFilter.getSamples();
-                
-                // 5. Convertir de vuelta a mono para la descarga.
-                const processedSamplesMono = new Float32Array(processedSamplesStereo.length / 2);
-                for (let i = 0; i < processedSamplesMono.length; i++) {
-                    processedSamplesMono[i] = processedSamplesStereo[i*2];
-                }
-                
-                // --- FIN: Lógica de procesamiento con SoundTouch ---
-
-                const newAudioBuffer = audioCtx.createBuffer(1, processedSamplesMono.length, audioBuffer.sampleRate);
-                newAudioBuffer.copyToChannel(processedSamplesMono, 0);
-
-                const processedWavBlob = audioBufferToWav(newAudioBuffer);
-                triggerDownload(processedWavBlob, speakingRate);
-                setStatus({ message: '¡Descarga de alta calidad iniciada!', type: 'success' });
-            
-            } catch (error) {
-                console.error("Error procesando el audio:", error);
-                setStatus({ message: `Error al procesar: ${error.message}`, type: "error" });
-            } finally {
-                setIsProcessingDownload(false);
-            }
-        }, 50); 
     };
 
     return (
@@ -339,17 +211,17 @@ export default function App() {
                 <div className="flex flex-col items-center justify-center space-y-4">
                     <button
                         onClick={handleGenerate}
-                        disabled={isLoading || isProcessingDownload || text.length > MAX_CHARS}
+                        disabled={isLoading || text.length > MAX_CHARS}
                         className="w-full md:w-auto px-8 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-300 ease-in-out transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {isLoading ? 'Generando...' : 'Generar Audio'}
                     </button>
                      <div className="h-10 flex items-center justify-center">
-                        {(isLoading || isProcessingDownload) && (
+                        {isLoading && (
                              <div className="border-4 border-gray-200 border-t-blue-500 rounded-full w-8 h-8 animate-spin"></div>
                         )}
                         {status.message && (
-                            <p className={`text-center ${status.type === 'error' ? 'text-red-500' : status.type === 'info' ? 'text-blue-500' : 'text-green-500'}`}>
+                            <p className={`text-center ${status.type === 'error' ? 'text-red-500' : 'text-green-500'}`}>
                                 {status.message}
                             </p>
                         )}
@@ -360,21 +232,14 @@ export default function App() {
                     <div className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                         <p className="text-sm font-medium text-gray-700 dark:text-gray-300 text-center">Audio generado:</p>
                         <audio ref={audioRef} controls src={audioUrl} className="w-full"></audio>
-                        <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                             <button
-                                onClick={() => triggerDownload(originalAudioBlob.current, 1.0)}
-                                disabled={isProcessingDownload}
-                                className="w-full sm:w-auto px-6 py-2 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition duration-300 disabled:opacity-50"
+                        <div className="flex justify-center mt-4">
+                             <a
+                                href={audioUrl}
+                                download={`audio-${speakingRate.toFixed(1)}x.wav`}
+                                className="w-full sm:w-auto px-6 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-300"
                             >
-                                Original (1.0x)
-                            </button>
-                             <button
-                                onClick={handleModifiedDownload}
-                                disabled={isProcessingDownload || speakingRate === 1}
-                                className="w-full sm:w-auto px-6 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {isProcessingDownload ? 'Procesando...' : `Tono Corregido (${speakingRate.toFixed(1)}x)`}
-                            </button>
+                                Descargar Audio
+                            </a>
                         </div>
                     </div>
                 )}

@@ -91,6 +91,20 @@ function audioBufferToWav(buffer) {
     return new Blob([view], { type: 'audio/wav' });
 }
 
+// **NUEVA FUNCIÓN PARA CARGAR SCRIPTS**
+const loadScript = (src) => {
+    return new Promise((resolve, reject) => {
+        if (document.querySelector(`script[src="${src}"]`)) {
+            return resolve();
+        }
+        const script = document.createElement('script');
+        script.src = src;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error(`Falló la carga del script ${src}`));
+        document.body.appendChild(script);
+    });
+};
+
 
 // --- Componente principal de la aplicación ---
 export default function App() {
@@ -102,29 +116,12 @@ export default function App() {
     const [isProcessingDownload, setIsProcessingDownload] = useState(false);
     const [status, setStatus] = useState({ message: '', type: '' });
     const [audioUrl, setAudioUrl] = useState('');
-    const [isSoundTouchReady, setIsSoundTouchReady] = useState(false); // **NUEVO ESTADO**
     
     const audioRef = useRef(null);
     const originalAudioBlob = useRef(null);
+    const isSoundTouchLoading = useRef(false);
     const MAX_CHARS = 500;
     const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
-
-    // **NUEVO EFECTO**: Verifica si SoundTouch está disponible
-    useEffect(() => {
-        // La librería se carga en window, así que verificamos si existe.
-        if (typeof window.SoundTouch !== 'undefined') {
-            setIsSoundTouchReady(true);
-        } else {
-            // Reintentamos por si tarda en cargar
-            const interval = setInterval(() => {
-                if (typeof window.SoundTouch !== 'undefined') {
-                    setIsSoundTouchReady(true);
-                    clearInterval(interval);
-                }
-            }, 500);
-            return () => clearInterval(interval);
-        }
-    }, []);
 
     const voices = [
         { value: 'Zephyr', label: 'Zephyr (Brillante, Femenina)' },
@@ -220,7 +217,21 @@ export default function App() {
     }
 
     const handleModifiedDownload = async () => {
-        if (!originalAudioBlob.current) return;
+        if (!originalAudioBlob.current || isSoundTouchLoading.current) return;
+    
+        // Si SoundTouch no está cargado, lo cargamos.
+        if (typeof window.SoundTouch === 'undefined') {
+            isSoundTouchLoading.current = true;
+            setStatus({ message: 'Cargando librería de audio...', type: 'info' });
+            try {
+                await loadScript('https://cdn.jsdelivr.net/npm/sound-touch-js@2.3.1/dist/sound-touch.js');
+            } catch (error) {
+                setStatus({ message: 'Error al cargar la librería de audio.', type: 'error' });
+                isSoundTouchLoading.current = false;
+                return;
+            }
+            isSoundTouchLoading.current = false;
+        }
 
         setIsProcessingDownload(true);
         setStatus({ message: 'Procesando audio (puede tardar)...', type: 'info' });
@@ -385,20 +396,15 @@ export default function App() {
                             </button>
                              <button
                                 onClick={handleModifiedDownload}
-                                // **LÓGICA MODIFICADA**: El botón se deshabilita si la librería no está lista
-                                disabled={isProcessingDownload || speakingRate === 1 || !isSoundTouchReady}
+                                disabled={isProcessingDownload || speakingRate === 1}
                                 className="w-full sm:w-auto px-6 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                                title={!isSoundTouchReady ? "La librería de procesamiento de audio aún está cargando." : ""}
                             >
                                 {isProcessingDownload ? 'Procesando...' : `Tono Corregido (${speakingRate.toFixed(1)}x)`}
                             </button>
                         </div>
-                         {!isSoundTouchReady && audioUrl && (
-                            <p className="text-xs text-center text-yellow-500">Cargando procesador de audio de alta calidad...</p>
-                        )}
                     </div>
                 )}
             </div>
         </div>
     );
-}
+                                }

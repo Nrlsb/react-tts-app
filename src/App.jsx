@@ -106,29 +106,30 @@ export default function App() {
     const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
     
     useEffect(() => {
-        // URL de la librería SoundTouch en el CDN
-        const soundTouchUrl = 'https://unpkg.com/sound-touch-js@2.3.1/dist/sound-touch.js';
+        // *** CAMBIO: Usamos el CDN de cdnjs (Cloudflare), que es más robusto. ***
+        const soundTouchUrl = 'https://cdnjs.cloudflare.com/ajax/libs/sound-touch-js/2.3.1/sound-touch.js';
 
-        // El script del worker ahora usará importScripts() para cargar la librería.
-        // Esta es la forma estándar y correcta de cargar scripts externos en un worker
-        // y evita el problema de CORS que estabas experimentando.
         const workerScript = `
-            // Cargar la librería SoundTouch desde el CDN
-            importScripts('${soundTouchUrl}');
+            try {
+                // Cargar la librería SoundTouch desde el nuevo CDN.
+                importScripts('${soundTouchUrl}');
+            } catch (e) {
+                // Si falla, notificar al hilo principal para que muestre un error.
+                self.postMessage({ error: 'No se pudo cargar la librería de procesamiento de audio.' });
+                throw e; // Detener la ejecución del worker.
+            }
 
-            // Este código se ejecutará solo después de que sound-touch.js se haya cargado y ejecutado.
             self.onmessage = (e) => {
                 const { buffer, sampleRate, tempo } = e.data;
                 
-                // La clase 'SoundTouch' ahora está disponible globalmente dentro del worker
-                // gracias a importScripts().
                 const soundtouch = new self.SoundTouch();
                 soundtouch.tempo = tempo;
                 soundtouch.sampleRate = sampleRate;
                 
                 const node = soundtouch.createNode(buffer, soundtouch.bufferSize);
                 const result = node.getSamples();
-                self.postMessage(result);
+                // Devolvemos el resultado en un objeto para poder manejar errores más fácilmente.
+                self.postMessage({ result });
             };
         `;
         
@@ -140,13 +141,12 @@ export default function App() {
             setStatus({ message: "No se pudo inicializar el procesador de audio.", type: "error" });
         }
 
-        // Función de limpieza para terminar el worker cuando el componente se desmonte.
         return () => {
             if (workerRef.current) {
                 workerRef.current.terminate();
             }
         };
-    }, []); // El array de dependencias vacío asegura que esto se ejecute solo una vez.
+    }, []);
 
 
     const voices = [
@@ -261,7 +261,15 @@ export default function App() {
             });
 
             workerRef.current.onmessage = (e) => {
-                const processedSamples = e.data;
+                // *** CAMBIO: Manejamos el caso de error que viene desde el worker. ***
+                if (e.data.error) {
+                    console.error("Error desde el worker:", e.data.error);
+                    setStatus({ message: `Error de procesamiento: ${e.data.error}`, type: "error" });
+                    setIsProcessingDownload(false);
+                    return;
+                }
+
+                const processedSamples = e.data.result;
                 const newAudioBuffer = audioCtx.createBuffer(1, processedSamples.length, audioBuffer.sampleRate);
                 newAudioBuffer.copyToChannel(processedSamples, 0);
 
@@ -404,4 +412,4 @@ export default function App() {
             </div>
         </div>
     );
-        }
+                }

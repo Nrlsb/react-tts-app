@@ -11,7 +11,7 @@ import React, { useState, useRef, useEffect } from 'react';
 function base64ToArrayBuffer(base64) {
     const binaryString = window.atob(base64);
     const len = binaryString.length;
-    const bytes = new Uint8Array(len);
+    const bytes = new UintArray(len);
     for (let i = 0; i < len; i++) {
         bytes[i] = binaryString.charCodeAt(i);
     }
@@ -91,51 +91,22 @@ export default function App() {
         { value: 'Sulafat', label: 'Sulafat (Cálida)' },
     ];
 
-    const callTtsApi = async (textToSpeak, voice) => {
-        const apiKey = "AIzaSyDEaE-5OJE_v3tHVcoryR1mWiS72wbBFm4"; // Canvas proporcionará la clave de API en tiempo de ejecución.
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+    // Llama a nuestro propio backend en lugar de a la API de Google directamente
+    const callBackendApi = async (textToSpeak, voice) => {
+        const backendUrl = 'http://localhost:3001/api/generate-tts';
 
-        const payload = {
-            contents: [{ parts: [{ text: `Di esto con una voz clara y natural: ${textToSpeak}` }] }],
-            generationConfig: {
-                responseModalities: ["AUDIO"],
-                speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } }
-            },
-            model: "gemini-2.5-flash-preview-tts"
-        };
+        const response = await fetch(backendUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: textToSpeak, voice: voice })
+        });
 
-        for (let i = 0, delay = 1000; i < 3; i++, delay *= 2) {
-            try {
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                if (response.ok) {
-                    const result = await response.json();
-                    const part = result?.candidates?.[0]?.content?.parts?.[0];
-                    const audioData = part?.inlineData?.data;
-                    const mimeType = part?.inlineData?.mimeType;
-
-                    if (audioData && mimeType?.startsWith("audio/")) {
-                        return { audioData, mimeType };
-                    }
-                    throw new Error("La respuesta de la API no contenía datos de audio válidos.");
-                } else if (response.status === 401) {
-                    throw new Error("Error de autenticación (401). La clave de API no es válida o no está configurada.");
-                } else if (response.status === 429 || response.status >= 500) {
-                     console.warn(`Intento ${i + 1} fallido con estado ${response.status}. Reintentando...`);
-                     await new Promise(resolve => setTimeout(resolve, delay));
-                } else {
-                    const errorBody = await response.text();
-                    throw new Error(`Error en la API: ${response.status}. ${errorBody}`);
-                }
-            } catch (error) {
-                if (i === 2) throw error; // Lanzar el error en el último reintento
-            }
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `Error del servidor: ${response.status}`);
         }
-        throw new Error("No se pudo obtener una respuesta de la API después de varios intentos.");
+
+        return await response.json();
     };
 
     const handleGenerate = async () => {
@@ -149,13 +120,13 @@ export default function App() {
         setAudioUrl('');
 
         try {
-            const audioData = await callTtsApi(text, selectedVoice);
-            if (audioData) {
-                const mimeType = audioData.mimeType || 'audio/L16; rate=24000';
+            const result = await callBackendApi(text, selectedVoice);
+            if (result && result.audioData) {
+                const mimeType = result.mimeType || 'audio/L16; rate=24000';
                 const sampleRateMatch = mimeType.match(/rate=(\d+)/);
                 const sampleRate = sampleRateMatch ? parseInt(sampleRateMatch[1], 10) : 24000;
                 
-                const pcmData = base64ToArrayBuffer(audioData.audioData);
+                const pcmData = base64ToArrayBuffer(result.audioData);
                 const pcm16 = new Int16Array(pcmData);
                 const wavBlob = pcmToWav(pcm16, sampleRate);
                 const url = URL.createObjectURL(wavBlob);

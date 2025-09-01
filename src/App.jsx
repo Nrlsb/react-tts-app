@@ -19,6 +19,7 @@ function writeString(view, offset, string) {
 }
 
 function pcmToWav(pcmData, sampleRate) {
+    // ... (código sin cambios)
     const numSamples = pcmData.length;
     const numChannels = 1;
     const bytesPerSample = 2;
@@ -50,15 +51,13 @@ function pcmToWav(pcmData, sampleRate) {
 }
 
 function audioBufferToWav(buffer) {
+    // ... (código sin cambios)
     const numOfChan = buffer.numberOfChannels;
     const length = buffer.length * numOfChan * 2 + 44;
     const bufferArray = new ArrayBuffer(length);
     const view = new DataView(bufferArray);
     const channels = [];
-    let i;
-    let sample;
-    let offset = 0;
-    let pos = 0;
+    let i, sample, offset = 0, pos = 0;
 
     writeString(view, offset, 'RIFF'); offset += 4;
     view.setUint32(offset, length - 8, true); offset += 4;
@@ -91,18 +90,38 @@ function audioBufferToWav(buffer) {
     return new Blob([view], { type: 'audio/wav' });
 }
 
-// **NUEVA FUNCIÓN PARA CARGAR SCRIPTS**
-const loadScript = (src) => {
-    return new Promise((resolve, reject) => {
-        if (document.querySelector(`script[src="${src}"]`)) {
-            return resolve();
+// --- Hook Personalizado para SoundTouch ---
+const useSoundTouch = () => {
+    const [isReady, setIsReady] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+
+    const load = async () => {
+        if (isReady || isLoading) return true;
+        if (typeof window.SoundTouch !== 'undefined') {
+            setIsReady(true);
+            return true;
         }
-        const script = document.createElement('script');
-        script.src = src;
-        script.onload = () => resolve();
-        script.onerror = () => reject(new Error(`Falló la carga del script ${src}`));
-        document.body.appendChild(script);
-    });
+
+        setIsLoading(true);
+        try {
+            await new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/sound-touch-js@2.3.1/dist/sound-touch.js';
+                script.onload = () => resolve();
+                script.onerror = () => reject(new Error('Falló la carga de SoundTouchJS'));
+                document.body.appendChild(script);
+            });
+            setIsReady(true);
+            return true;
+        } catch (error) {
+            console.error(error);
+            return false;
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return { isSoundTouchReady: isReady, isSoundTouchLoading: isLoading, loadSoundTouch: load };
 };
 
 
@@ -119,11 +138,13 @@ export default function App() {
     
     const audioRef = useRef(null);
     const originalAudioBlob = useRef(null);
-    const isSoundTouchLoading = useRef(false);
     const MAX_CHARS = 500;
     const backendUrl = 'https://tts-app-backend-cp16.onrender.com/api/generate-tts';
 
+    const { isSoundTouchReady, isSoundTouchLoading, loadSoundTouch } = useSoundTouch();
+
     const voices = [
+        // ... (voces sin cambios)
         { value: 'Zephyr', label: 'Zephyr (Brillante, Femenina)' },
         { value: 'Puck', label: 'Puck (Animada, Masculina)' },
         { value: 'Charon', label: 'Charon (Informativa, Masculina)' },
@@ -151,16 +172,15 @@ export default function App() {
     };
 
     const handleGenerate = async () => {
+        // ... (lógica sin cambios)
         if (!text.trim() || text.length > MAX_CHARS) {
             setStatus({ message: "Por favor, introduce texto válido y no excedas el límite.", type: "error" });
             return;
         }
-
         setIsLoading(true);
         setStatus({ message: '', type: '' });
         setAudioUrl('');
         originalAudioBlob.current = null;
-
         try {
             const result = await callBackendApi(text, selectedVoice, stylePrompt);
             if (result && result.audioData) {
@@ -217,22 +237,16 @@ export default function App() {
     }
 
     const handleModifiedDownload = async () => {
-        if (!originalAudioBlob.current || isSoundTouchLoading.current) return;
-    
-        // Si SoundTouch no está cargado, lo cargamos.
-        if (typeof window.SoundTouch === 'undefined') {
-            isSoundTouchLoading.current = true;
-            setStatus({ message: 'Cargando librería de audio...', type: 'info' });
-            try {
-                await loadScript('https://cdn.jsdelivr.net/npm/sound-touch-js@2.3.1/dist/sound-touch.js');
-            } catch (error) {
-                setStatus({ message: 'Error al cargar la librería de audio.', type: 'error' });
-                isSoundTouchLoading.current = false;
-                return;
-            }
-            isSoundTouchLoading.current = false;
-        }
+        if (!originalAudioBlob.current) return;
+        
+        setStatus({ message: 'Preparando descarga...', type: 'info' });
 
+        const isLoaded = await loadSoundTouch();
+        if (!isLoaded) {
+            setStatus({ message: 'Error al cargar librería de audio.', type: 'error' });
+            return;
+        }
+        
         setIsProcessingDownload(true);
         setStatus({ message: 'Procesando audio (puede tardar)...', type: 'info' });
 
@@ -296,6 +310,7 @@ export default function App() {
                 </div>
 
                 <div className="space-y-4">
+                    {/* ... (inputs sin cambios) */}
                      <div>
                         <div className="flex justify-between items-center mb-2">
                             <label htmlFor="text-input" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -371,7 +386,7 @@ export default function App() {
                         {isLoading ? 'Generando...' : 'Generar Audio'}
                     </button>
                      <div className="h-10 flex items-center justify-center">
-                        {(isLoading || isProcessingDownload) && (
+                        {(isLoading || isProcessingDownload || isSoundTouchLoading) && (
                              <div className="border-4 border-gray-200 border-t-blue-500 rounded-full w-8 h-8 animate-spin"></div>
                         )}
                         {status.message && (
@@ -389,17 +404,17 @@ export default function App() {
                         <div className="flex flex-col sm:flex-row gap-4 justify-center">
                              <button
                                 onClick={() => triggerDownload(originalAudioBlob.current, 1.0)}
-                                disabled={isProcessingDownload}
+                                disabled={isProcessingDownload || isSoundTouchLoading}
                                 className="w-full sm:w-auto px-6 py-2 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition duration-300 disabled:opacity-50"
                             >
                                 Original (1.0x)
                             </button>
                              <button
                                 onClick={handleModifiedDownload}
-                                disabled={isProcessingDownload || speakingRate === 1}
+                                disabled={isProcessingDownload || speakingRate === 1 || isSoundTouchLoading}
                                 className="w-full sm:w-auto px-6 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                {isProcessingDownload ? 'Procesando...' : `Tono Corregido (${speakingRate.toFixed(1)}x)`}
+                                {isProcessingDownload || isSoundTouchLoading ? 'Procesando...' : `Tono Corregido (${speakingRate.toFixed(1)}x)`}
                             </button>
                         </div>
                     </div>
@@ -407,4 +422,4 @@ export default function App() {
             </div>
         </div>
     );
-                                }
+        }

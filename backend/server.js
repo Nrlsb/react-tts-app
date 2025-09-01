@@ -45,7 +45,7 @@ app.post('/api/generate-tts', async (req, res) => {
 
     // Añadir speakingRate a speechConfig solo si se proporciona un valor numérico válido
     if (speakingRate && !isNaN(speakingRate)) {
-        speechConfig.speakingRate = parseFloat(speakingRate);
+        speechConfig.speaking_rate = parseFloat(speakingRate); // CORREGIDO: de speakingRate a speaking_rate
     }
 
     const payload = {
@@ -92,6 +92,7 @@ app.post('/api/generate-tts', async (req, res) => {
 app.listen(PORT, () => {
     console.log(`Servidor escuchando en http://localhost:${PORT}`);
 });
+
 
 
 

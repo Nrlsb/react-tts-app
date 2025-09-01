@@ -36,24 +36,26 @@ app.post('/api/generate-tts', async (req, res) => {
         ? `Dilo ${style}: ${text}`
         : `Di esto con una voz clara y natural: ${text}`;
 
-    // Construir el objeto speechConfig dinámicamente
-    const speechConfig = {
-        voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: voice }
+    // CORRECCIÓN: Construir la configuración de la voz.
+    // El parámetro speakingRate debe ir dentro de voiceConfig.
+    const voiceConfig = {
+        prebuiltVoiceConfig: {
+            voiceName: voice
         }
     };
 
-    // Añadir speakingRate a speechConfig solo si se proporciona un valor numérico válido
-    // CORRECCIÓN: El nombre del campo debe ser "speakingRate" (camelCase)
+    // Añadir speakingRate a voiceConfig solo si se proporciona un valor numérico válido
     if (speakingRate && !isNaN(speakingRate)) {
-        speechConfig.speakingRate = parseFloat(speakingRate);
+        voiceConfig.speakingRate = parseFloat(speakingRate);
     }
 
     const payload = {
         contents: [{ parts: [{ text: finalText }] }],
         generationConfig: {
             responseModalities: ["AUDIO"],
-            speechConfig: speechConfig // Usar el objeto speechConfig construido dinámicamente
+            speechConfig: {
+                voiceConfig: voiceConfig
+            }
         },
         model: "gemini-2.5-flash-preview-tts"
     };
@@ -93,3 +95,4 @@ app.post('/api/generate-tts', async (req, res) => {
 app.listen(PORT, () => {
     console.log(`Servidor escuchando en http://localhost:${PORT}`);
 });
+
